@@ -94,28 +94,19 @@ button { cursor:pointer; }
 @keyframes outputReloadSpin { from { transform:rotate(0deg); } to { transform:rotate(360deg); } }
 .eyebrow { display:block; font-size:9px; letter-spacing:.20em; color:rgba(255,255,255,.54); }
 .waiting-text { display:block; margin-top:3px; font-size:11px; color:rgba(255,255,255,.78); }
-.links-header { padding:8px 15px 0; display:flex; flex-wrap:wrap; gap:6px; flex-shrink:0; }
-.links-header[hidden] { display:none; }
-.extracted-link { background:#2563eb; color:#fff; text-decoration:none; padding:3px 9px; border-radius:8px; font-size:11px; display:inline-block; word-break:break-all; }
 .ai-output { flex:1; min-height:0; overflow-y:auto; padding:12px 15px 18px; white-space:pre-wrap; word-break:break-word; line-height:1.7; font-size:13.5px; text-shadow:0 1px 2px rgba(0,0,0,.18); scrollbar-width:thin; }
 /* Gemini等がテキスト以外（画像/音声/動画）を返した場合の表示領域 */
 .response-media { padding:0 15px 14px; display:flex; flex-direction:column; gap:10px; flex-shrink:0; }
 .response-media[hidden] { display:none; }
 .response-media-item { display:flex; flex-direction:column; gap:6px; }
+.response-media .media-file-link-disabled { background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.18); border-radius:10px; padding:8px 10px; font-size:12px; color:rgba(255,255,255,.62); }
 .response-media img, .response-media video { max-width:100%; border-radius:10px; display:block; }
 .response-media audio { width:100%; }
-.response-media .media-file-link { background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.25); border-radius:10px; padding:8px 10px; font-size:12px; color:#fff; text-decoration:none; display:block; }
 .media-download-btn { align-self:flex-start; background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.3); border-radius:10px; padding:6px 10px; font-size:11.5px; color:#fff; cursor:pointer; }
 .media-download-btn:active { background:rgba(255,255,255,.2); }
 .media-just-generated { animation: mediaGeneratedKick .5s cubic-bezier(.34,1.56,.64,1) both; }
 @keyframes mediaGeneratedKick { 0% { transform:scale(.97); box-shadow:0 0 0 0 rgba(37,99,235,.6); } 60% { transform:scale(1.01); box-shadow:0 0 0 8px rgba(37,99,235,0); } 100% { transform:scale(1); box-shadow:0 0 0 0 rgba(37,99,235,0); } }
 
-/* ---------- アプリ内部リンク表示（簡易内部ブラウザ・戻るボタン付き） ---------- */
-.inapp-browser-overlay { position:fixed; inset:0; z-index:9999; background:#111; display:flex; flex-direction:column; }
-.inapp-browser-bar { display:flex; align-items:center; gap:10px; padding:10px 12px; padding-top:calc(10px + env(safe-area-inset-top, 0px)); background:rgba(10,10,32,.92); border-bottom:1px solid rgba(255,255,255,.15); flex-shrink:0; }
-.inapp-browser-back-btn { flex-shrink:0; background:var(--accent, #2563eb); color:#fff; border:none; border-radius:10px; padding:8px 12px; font-size:12.5px; font-weight:600; cursor:pointer; }
-.inapp-browser-url { font-size:11px; color:#999; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.inapp-browser-frame { flex:1; border:0; width:100%; background:#fff; }
 
 /* ---------- immersive ---------- */
 .immersive .topbar, .immersive .command-bar, .immersive .output-panel { display:none !important; }
@@ -176,6 +167,8 @@ button:disabled { opacity:.38; cursor:not-allowed; }
 .drawer-see-all { flex-shrink:0; text-align:left; background:transparent; border:0; color:rgba(255,255,255,.7); font-size:11px; padding:8px 2px 0; }
 .drawer-divider { flex-shrink:0; height:1px; background:rgba(255,255,255,.12); margin:14px 0; }
 .drawer-categories { flex-shrink:0; display:grid; gap:6px; }
+.drawer-chat-settings { gap:2px; }
+.drawer-chat-settings button { padding-top:8px; padding-bottom:8px; }
 .drawer-categories button, .drawer-back { display:flex; align-items:center; gap:10px; text-align:left; border:1.5px solid rgba(255,255,255,.35); background:rgba(255,255,255,.05); padding:11px 13px; border-radius:12px; font-size:12px; width:100%; }
 .drawer-categories button span.label, .drawer-back span.label { flex:1; }
 .drawer-chevron { width:14px; height:14px; flex-shrink:0; opacity:.5; }
@@ -210,6 +203,26 @@ button:disabled { opacity:.38; cursor:not-allowed; }
 .hcontext-meta { font-size:10px; color:#777; margin-top:5px; line-height:1.5; }
 .modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
 .modal-actions button { border:1px solid rgba(255,255,255,.14); background:rgba(255,255,255,.07); padding:9px 14px; border-radius:11px; }
+
+/* ---------- app-internal browser popup (API Console) ---------- */
+.internal-browser-overlay { position:fixed; inset:0; z-index:180; display:none; align-items:center; justify-content:center; padding:20px; background:rgba(3,3,16,.62); backdrop-filter:blur(7px); -webkit-backdrop-filter:blur(7px); }
+.internal-browser-window { width:min(88vw, 760px); height:min(74dvh, 680px); max-width:calc(100vw - 24px); max-height:calc(100dvh - 32px); min-width:280px; min-height:240px; display:flex; flex-direction:column; overflow:hidden; border:1.5px solid rgba(255,255,255,.5); border-radius:20px; background:rgba(18,17,45,.97); box-shadow:var(--shadow); }
+.internal-browser-head { flex:0 0 auto; min-height:48px; display:flex; align-items:center; gap:8px; padding:7px 8px 7px 14px; border-bottom:1px solid rgba(255,255,255,.15); }
+.internal-browser-title { flex:1; min-width:0; font-size:12px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.internal-browser-close { flex:0 0 auto; min-width:68px; height:34px; padding:0 12px; border:1px solid rgba(255,255,255,.2); border-radius:10px; background:rgba(255,255,255,.08); color:#fff; font-size:11.5px; }
+.internal-browser-close:active { background:rgba(255,255,255,.16); }
+.api-launcher-window { height:min(42dvh, 360px); min-height:260px; }
+.api-launcher-body { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; padding:24px; text-align:center; }
+.api-launcher-icon { width:52px; height:52px; display:grid; place-items:center; border:1px solid rgba(255,255,255,.18); border-radius:16px; background:rgba(255,255,255,.08); font-size:25px; }
+.api-launcher-message { font-size:14px; font-weight:700; }
+.api-launcher-url { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:10px; opacity:.62; }
+.api-console-open-btn { min-width:190px; margin-top:4px; }
+.api-launcher-note { max-width:520px; margin:2px 0 0; font-size:10px; line-height:1.6; opacity:.58; }
+
+@media (max-width:480px) {
+  .internal-browser-overlay { padding:12px; }
+  .internal-browser-window { width:92vw; height:72dvh; border-radius:17px; }
+}
 
 @media (min-width:760px) { .command-bar { align-self:center; width:min(720px, calc(100% - 40px)); } .output-panel { align-self:center; width:min(760px, calc(100% - 40px)); } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration:.01ms !important; transition-duration:.01ms !important; } }
@@ -247,7 +260,6 @@ button:disabled { opacity:.38; cursor:not-allowed; }
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg>
       </button>
     </div>
-    <div id="links-header" class="links-header" hidden></div>
     <div id="response-box" class="ai-output"></div>
     <div id="response-media" class="response-media" hidden></div>
   </section>
@@ -278,10 +290,27 @@ button:disabled { opacity:.38; cursor:not-allowed; }
       <div class="drawer-title">FavHub</div>
       <div class="drawer-tagline">あなたの「好き」を、AIに。</div>
       <div id="drawer-body"></div>
-      <button type="button" class="drawer-foot" data-action="api">API Consoleを見る →</button>
+      <button type="button" class="drawer-foot" data-action="api">APIコンソールへ →</button>
     </div>
   </aside>
 </main>
+
+<!-- APIコンソール：アプリ内部ブラウザ -->
+<div id="internal-browser-overlay" class="internal-browser-overlay" role="dialog" aria-modal="true" aria-hidden="true" aria-label="APIコンソール">
+  <div class="internal-browser-window api-launcher-window">
+    <div class="internal-browser-head">
+      <div id="internal-browser-title" class="internal-browser-title">APIコンソール</div>
+      <button type="button" id="internal-browser-close" class="internal-browser-close">閉じる</button>
+    </div>
+    <div class="api-launcher-body">
+      <div class="api-launcher-icon">↗</div>
+      <div id="api-launcher-message" class="api-launcher-message">APIキーの確認・発行ページを開きます。ログイン後、APIキーを確認してFavHubの設定画面に戻ってください。</div>
+      <div id="api-launcher-url" class="api-launcher-url"></div>
+      <button type="button" id="api-console-open-btn" class="primary-btn api-console-open-btn">APIキー設定ページを開く</button>
+      <p class="api-launcher-note">このボタンはCapacitorの外部ブラウザ機能を優先して開きます。端末側で利用できない場合は、FavHubの画面内でそのページへ移動します。</p>
+    </div>
+  </div>
+</div>
 
 <!-- 挿絵管理（サービスごと） -->
 <div id="gallery-modal" class="modal-overlay">
@@ -437,21 +466,6 @@ button:disabled { opacity:.38; cursor:not-allowed; }
   </div>
 </div>
 
-<!-- リンクの開き方 -->
-<div id="links-modal" class="modal-overlay">
-  <div class="modal-content">
-    <h3><span class="drawer-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4H4v12h12v-4"/><path d="M10 2h8v8M18 2L9 11"/></svg></span>外部リンク設定</h3>
-    <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-bottom:4px;">
-      <input type="checkbox" id="open-links-externally-toggle" style="width:16px; height:16px;">
-      <span style="font-size:12px; color:#ccc;">受信したURLリンクを外部ブラウザで開く</span>
-    </label>
-    <div style="font-size:11px; color:#888;">オフにするとアプリ内（WebView内）遷移を試みます。</div>
-    <div class="modal-actions">
-      <button id="links-close-btn">キャンセル</button>
-      <button id="links-save-btn" class="primary-btn">保存</button>
-    </div>
-  </div>
-</div>
 
 <!-- セリフ設定 -->
 <div id="texts-modal" class="modal-overlay">
@@ -519,7 +533,7 @@ button:disabled { opacity:.38; cursor:not-allowed; }
  *    RequestState管理/RequestLog履歴/Secure Storage境界）は仕様書に合わせた。
  *  - 仕様書で未定義の機能（音声入力・添付ファイル・画像ギャラリー・
  *    5W3H構造化文脈・セッション単位アーカイブ・バックアップ/復元・
- *    受信リンクの外部/内部遷移トグル）はデモHTML側の定義をそのまま踏襲した。
+ *    APIコンソールのアプリ内部表示）はデモHTML側の定義をそのまま踏襲した。
  * ========================================================================= */
 
 /* ---------------- モデル設定 ----------------
@@ -583,7 +597,6 @@ const DRAWER_ICONS = {
   persona: drawerIconSvg('<path d="M3 6h8M15 6h2M3 14h2M9 14h8"/><circle cx="12" cy="6" r="2"/><circle cx="6" cy="14" r="2"/>'),
   hcontext: drawerIconSvg('<path d="M10 3l7 3.5-7 3.5-7-3.5L10 3z"/><path d="M3 10l7 3.5 7-3.5M3 13.5l7 3.5 7-3.5"/>'),
   immersive: drawerIconSvg('<path d="M3 7V3h4M17 7V3h-4M3 13v4h4M17 13v4h-4"/>'),
-  links: drawerIconSvg('<path d="M8 4H4v12h12v-4"/><path d="M10 2h8v8M18 2L9 11"/>'),
   texts: drawerIconSvg('<path d="M3 4h14v9H8l-3 3v-3H3V4z"/>'),
   chevronRight: drawerIconSvg('<path d="M7 4l6 6-6 6"/>'),
   chevronLeft: drawerIconSvg('<path d="M13 4l-6 6 6 6"/>')
@@ -597,7 +610,6 @@ const DRAWER_CATEGORIES = {
   ]},
   chatSettings: { title:'チャット設定', icon:DRAWER_ICONS.chatSettings, items:[
     { label:'イマーシブビュー', action:'immersive-settings', icon:DRAWER_ICONS.immersive },
-    { label:'外部リンク設定', action:'links', icon:DRAWER_ICONS.links },
     { label:'コンテキスト管理', action:'hcontext', icon:DRAWER_ICONS.hcontext },
     { label:'API別設定', action:'api-per-service', icon:DRAWER_ICONS.apiPerService }
   ]},
@@ -677,17 +689,13 @@ function mediaExtFromMime(mimeType = '') {
 function looksLikeHallucinatedMediaTag(text = '') {
   return /<img\s+[^>]*src=|!\[[^\]]*\]\([^)]+\)|googleusercontent\.com|<video\s+[^>]*src=/i.test(text);
 }
-// 生成物（画像/音声/動画/ファイル）をダウンロードする。dataUrl（base64）を持つものは
-// aタグのdownload属性でそのまま端末に保存でき、外部URI（uri）のみの場合はopenUrlExternallyに委ねる。
+// 生成物（画像/音声/動画/ファイル）を端末へ保存する。外部URIは扱わない。
 function downloadMediaItem(item, idx = 0) {
+  if (!item?.dataUrl) return;
   const filename = `favhub_${item.kind || 'file'}_${Date.now()}_${idx}.${mediaExtFromMime(item.mimeType)}`;
-  if (item.dataUrl) {
-    const a = document.createElement('a');
-    a.href = item.dataUrl; a.download = filename;
-    document.body.appendChild(a); a.click(); a.remove();
-    return;
-  }
-  if (item.uri) openUrlExternally(item.uri);
+  const a = document.createElement('a');
+  a.href = item.dataUrl; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
 }
 
 function compressImage(file, maxWidth = 800, quality = 0.7) {
@@ -718,95 +726,6 @@ async function copyTextToClipboard(text = '') {
     catch (e) { console.warn('clipboard write failed:', e); }
   }
   return false;
-}
-
-/* URLを外部ブラウザで確実に開く。
- * Capacitorのラッピングはもう前提にしないため、Capacitor固有の判定は行わない。
- * 優先順位：
- * ①Android想定の window.FavHubNative.openExternalUrl(url)（ネイティブ層のJavascriptInterface想定）
- * ②iOS想定の window.webkit.messageHandlers.favhubOpenExternalUrl.postMessage(url)
- * ③ブラウザのwindow.open()
- * ④上記がすべて使えない・失敗する環境向けの、アプリ内蔵の簡易内部ブラウザ（オーバーレイ表示）。
- *   ここに落ちた場合、メイン画面が完全に隠れるため、必ず常設の「戻る」ボタンで復帰できるようにする。 */
-function openUrlExternally(url) {
-  if (window.FavHubNative?.openExternalUrl) {
-    try { window.FavHubNative.openExternalUrl(url); return; }
-    catch (e) { console.warn('native openExternalUrl (Android) failed:', e); }
-  }
-  if (window.webkit?.messageHandlers?.favhubOpenExternalUrl) {
-    try { window.webkit.messageHandlers.favhubOpenExternalUrl.postMessage(url); return; }
-    catch (e) { console.warn('native openExternalUrl (iOS) failed:', e); }
-  }
-  openUrlExternallyFallback(url);
-}
-function openUrlExternallyFallback(url) {
-  // window.open()はユーザー操作起点の同期呼び出しであればポップアップブロックの対象になりにくい。
-  const win = window.open(url, '_blank', 'noopener,noreferrer');
-  if (win) return;
-  // window.open()が失敗（null）した場合：アプリ内部（同一画面）でリンク先を表示することになるため、
-  // メイン画面へ戻る手段を失わないよう、内蔵の簡易内部ブラウザ（戻るボタン付き）へフォールバックする。
-  showInAppBrowserOverlay(url);
-}
-/* ネイティブブリッジもwindow.open()も使えない環境で、リンク先をアプリ内部に表示するための簡易ビュー。
- * アプリ本体の画面（メイン画面）はDOM上に残したまま、最前面にオーバーレイとして重ねて表示するため、
- * 常設の「メイン画面に戻る」ボタンでオーバーレイを閉じるだけで、いつでも元の画面に復帰できる。
- * ※フルスクリーンAPI（Fullscreen API）は、ブラウザの仕様上、通常のz-index/DOM階層を無視して
- * 最前面に表示される「トップレイヤー」を使うため、読み込んだサイト側が動画などをフルスクリーン化
- * すると、戻るボタンより上に覆いかぶさって操作不能になることがある。これを防ぐため、
- * iframeに対してフルスクリーンAPIの利用を明示的に許可しない（allow属性にfullscreenを含めない）上、
- * 万一フルスクリーン化されても即座に解除するガードを併設する。 */
-function showInAppBrowserOverlay(url) {
-  const existing = document.getElementById('inapp-browser-overlay');
-  if (existing) existing.remove();
-  const overlay = document.createElement('div');
-  overlay.id = 'inapp-browser-overlay';
-  overlay.className = 'inapp-browser-overlay';
-  const bar = document.createElement('div');
-  bar.className = 'inapp-browser-bar';
-  const backBtn = document.createElement('button');
-  backBtn.type = 'button';
-  backBtn.className = 'inapp-browser-back-btn';
-  backBtn.textContent = '◀ メイン画面に戻る';
-  const urlLabel = document.createElement('span');
-  urlLabel.className = 'inapp-browser-url';
-  urlLabel.textContent = url;
-  bar.appendChild(backBtn);
-  bar.appendChild(urlLabel);
-  const iframe = document.createElement('iframe');
-  iframe.className = 'inapp-browser-frame';
-  // フルスクリーンAPIの許可を明示的に与えない（＝拒否）。allowfullscreen属性も付与しない。
-  iframe.setAttribute('allow', 'fullscreen \'none\'');
-  // 「読み込んだサイトがフルスクリーン表示になり、戻るボタンが押せなくなる」の本当の原因はこちら：
-  // 多くのサイトはiframeに埋め込まれることを想定しておらず、フレーム化を検知して
-  // 自分自身をトップレベル（親ウィンドウ全体）に強制的にナビゲートする「フレームバスティング」を
-  // 行うことがある（例: if (top !== self) top.location = location.href;）。これが実行されると、
-  // アプリ本体（戻るボタンを含むページ全体）がその外部サイトに丸ごと置き換わってしまい、
-  // 「全画面表示になって戻るボタンが押せない」ように見える。Fullscreen APIの問題ではなかった。
-  // sandbox属性から allow-top-navigation 系のトークンを意図的に外すことで、
-  // このトップレベルナビゲーションをブラウザ側で強制的にブロックできる。
-  iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals');
-  iframe.src = url;
-  overlay.appendChild(bar);
-  overlay.appendChild(iframe);
-  document.body.appendChild(overlay);
-
-  // 万一（WebView側の実装差異などで）フルスクリーン化されてしまった場合に備え、
-  // 検知次第すぐさま解除して戻るボタンを操作可能な状態に戻す保険。
-  const exitFullscreenGuard = () => {
-    const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
-    if (fsEl) {
-      (document.exitFullscreen ? document.exitFullscreen() : document.webkitExitFullscreen?.())?.catch?.(() => {});
-    }
-  };
-  document.addEventListener('fullscreenchange', exitFullscreenGuard);
-  document.addEventListener('webkitfullscreenchange', exitFullscreenGuard);
-
-  const closeOverlay = () => {
-    document.removeEventListener('fullscreenchange', exitFullscreenGuard);
-    document.removeEventListener('webkitfullscreenchange', exitFullscreenGuard);
-    overlay.remove();
-  };
-  backBtn.onclick = closeOverlay;
 }
 
 /* ---------------- Secure Storage 境界（仕様書 secure-storage.js 準拠） ----------------
@@ -923,7 +842,7 @@ async function purgeExpiredMedia() {
 const AppState = {
   // AIモデル（仕様書のCurrentAIModel: service/slot）
   CurrentAIModel: safeJSONParse('favhub_current_model', { service:'Gemini', slot:'QuickModel' }),
-  // モデル設定: endpoint/apiConsoleUrl/providerは常にコード側の最新値を使う。
+  // モデル設定: endpoint/providerは常にコード側の最新値を使う。
   // 過去バージョンで保存されたendpointが残ってしまい修正が反映されない事故を防ぐため、
   // 永続化するのはユーザーが変更しうる「モデル名」だけに限定する（下のloadPersistedModelNames参照）。
   modelConfig: JSON.parse(JSON.stringify(DEFAULT_MODEL_CONFIG)),
@@ -947,12 +866,6 @@ const AppState = {
   // オートモーション（ズーム&スライド）のオン/オフ
   ImmersiveMotionEnabled: (() => {
     const saved = localStorage.getItem('favhub_immersive_motion_enabled');
-    return saved === null ? true : saved === 'true';
-  })(),
-
-  // 受信したURLリンクを外部ブラウザで開くか（仕様書未定義・HTML側の定義を踏襲）
-  openLinksExternally: (() => {
-    const saved = localStorage.getItem('favhub_open_links_externally');
     return saved === null ? true : saved === 'true';
   })(),
 
@@ -1193,6 +1106,33 @@ function geminiModelSupportsImageOutput(model = '') {
   return /image|nano-?banana/i.test(model);
 }
 
+// 生成系モデルを「テキスト / 画像 / 動画」に分け、完了判定をモデル種別に合わせる。
+function detectGeminiGenerationType(model = '') {
+  const name = String(model || '').toLowerCase();
+  if (/veo|video/.test(name)) return 'video';
+  if (geminiModelSupportsImageOutput(name)) return 'image';
+  return 'text';
+}
+
+// ユーザーが実際にメディア生成を依頼しているかを軽く判定する。
+// モデルが画像対応でも、通常の質問まで「画像必須」とは扱わない。
+function promptRequestsMedia(prompt = '', type = 'text') {
+  const text = String(prompt || '').toLowerCase();
+  if (type === 'video') return /動画|ビデオ|映像|ムービー|video|movie|animation|animate|映像を作|動画を作|動画生成|video generation/i.test(text);
+  if (type === 'image') return /画像|イラスト|写真|絵|描い|生成して|作って|image|illustration|picture|photo|draw|generate/i.test(text);
+  return false;
+}
+
+function createMediaGenerationError(type, model) {
+  const label = type === 'video' ? '動画' : '画像';
+  const e = new Error(`${label}生成モデル（${model}）から${label}データが返りませんでした。`);
+  e.provider = 'Gemini';
+  e.code = 'MEDIA_NOT_RETURNED';
+  e.generationType = type;
+  e.noRetry = true;
+  return e;
+}
+
 const ProviderService = {
   // ChatGPT: 仕様書記載の /v1/responses ストリーミング形式が404だったため、
   // 従前どおり /v1/chat/completions の非ストリーミング形式に戻した。
@@ -1219,6 +1159,13 @@ const ProviderService = {
   // Interactions API（/v1beta/interactions, previous_interaction_id）を使う（旧コメントの404は解消済み）。
   async sendGemini({ endpoint, apiKey, model, systemPrompt, history, prompt, attachments, signal, onDelta, onMedia, useInteractionId, previousInteractionId, onInteractionId }) {
     if (useInteractionId) return ProviderService.sendGeminiInteraction({ apiKey, model, systemPrompt, prompt, attachments, previousInteractionId, signal, onDelta, onMedia, onInteractionId });
+
+    const generationType = detectGeminiGenerationType(model);
+    // VeoはgenerateContentではなく長時間実行Operationを使う。
+    if (generationType === 'video') {
+      return ProviderService.sendGeminiVideo({ apiKey, model, prompt, attachments, signal, onDelta, onMedia });
+    }
+
     const url = `${endpoint}/${model}:generateContent?key=${apiKey}`;
     const parts = [];
     let fullPrompt = prompt;
@@ -1230,37 +1177,103 @@ const ProviderService = {
     const historyContents = history.map(h => ({ role: h.role === 'assistant' ? 'model' : 'user', parts:[{ text:h.content }] }));
     const bodyData = { contents: [...historyContents, { role:'user', parts }] };
     if (systemPrompt) bodyData.system_instruction = { parts:[{ text: systemPrompt }] };
-    // Google Search Grounding: 有効時のみ google_search ツールを付与する（generateContentの現行仕様）
     if (AppState.GeminiSearchGroundingEnabled) bodyData.tools = [{ google_search: {} }];
-    // 画像生成モデルには明示的に responseModalities: ["TEXT","IMAGE"] を指定しないと、
-    // 実際の画像データを返さず「IMAGE_GENERATION」のようなテキストだけを返すことがある
-    // （Google公式ドキュメントが必須としている設定）。画像出力に対応しないモデルに指定すると
-    // 逆にエラーになるため、モデル名から画像対応と判定できた場合のみ付与する。
-    if (geminiModelSupportsImageOutput(model)) {
+    if (generationType === 'image') {
       bodyData.generationConfig = { ...(bodyData.generationConfig || {}), responseModalities: ['TEXT', 'IMAGE'] };
     }
-    // FLEX推論: 有効時のみservice_tierを付与する（コスト5割減の代わりに待ち時間が伸び、
-    // 混雑時は503/429で弾かれうるため、タイムアウトも専用の長めの値に切り替える）
     if (AppState.GeminiFlexInferenceEnabled) bodyData.service_tier = 'flex';
     const geminiTimeout = AppState.GeminiFlexInferenceEnabled ? GEMINI_FLEX_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
     const res = await fetchWithTimeout(url, { method:'POST', signal, headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(bodyData) }, geminiTimeout);
     const data = await res.json();
     if (!res.ok || data.error) throw Object.assign(new Error(data.error?.message || 'Gemini API呼び出し失敗'), { status:res.status, provider:'Gemini', body: JSON.stringify(data) });
-    // 画像生成モデル（nano-banana等）はcandidates[0].content.partsにinline_data（画像等）を返すことがあるため、
-    // textだけでなく全partsを走査してテキストとメディア（画像/音声/動画）を両方拾う。
-    const respParts = data.candidates?.[0]?.content?.parts || [];
+
+    // candidates[0]だけでなく、返却された全candidate / 全partを走査してメディアを取りこぼさない。
+    const candidates = Array.isArray(data.candidates) ? data.candidates : [];
     let text = '';
     const media = [];
-    respParts.forEach(p => {
-      if (typeof p.text === 'string') { text += p.text; return; }
-      const inline = p.inlineData || p.inline_data;
-      if (inline?.data) {
-        const mimeType = inline.mimeType || inline.mime_type || 'application/octet-stream';
-        media.push({ kind: mediaKindFromMime(mimeType), mimeType, dataUrl:`data:${mimeType};base64,${inline.data}` });
-      }
+    candidates.forEach(candidate => {
+      (candidate?.content?.parts || []).forEach(p => {
+        if (typeof p.text === 'string') { text += p.text; return; }
+        const inline = p.inlineData || p.inline_data;
+        if (inline?.data) {
+          const mimeType = inline.mimeType || inline.mime_type || 'application/octet-stream';
+          media.push({ kind: mediaKindFromMime(mimeType), mimeType, dataUrl:`data:${mimeType};base64,${inline.data}` });
+        }
+      });
     });
     onDelta(text);
     if (media.length && onMedia) onMedia(media);
+
+    // 明示的な画像生成依頼なのに画像データが0件なら「完了」とは扱わない。
+    // ここでは再試行しない（再生成の重複を避けるため）。
+    if (generationType === 'image' && promptRequestsMedia(prompt, 'image') && media.length === 0) {
+      throw createMediaGenerationError('image', model);
+    }
+  },
+
+  // Veo: predictLongRunning -> Operation polling -> generated video URI download。
+  async sendGeminiVideo({ apiKey, model, prompt, attachments, signal, onDelta, onMedia }) {
+    const base = 'https://generativelanguage.googleapis.com/v1beta';
+    const url = `${base}/models/${model}:predictLongRunning`;
+    let fullPrompt = prompt;
+    const instances = [{ prompt: fullPrompt }];
+    // 現行UIの添付画像を、Veoが受け付けるinlineDataとして可能な範囲で渡す。
+    attachments.filter(a => a.isImage).slice(0, 3).forEach(a => {
+      instances[0].image = { inlineData: { mimeType: a.mimeType, data: a.data.split(',')[1] } };
+    });
+
+    const body = { instances };
+    const res = await fetchWithTimeout(url, {
+      method:'POST', signal,
+      headers:{ 'x-goog-api-key':apiKey, 'Content-Type':'application/json' },
+      body: JSON.stringify(body)
+    }, GEMINI_FLEX_TIMEOUT_MS);
+    const startData = await res.json();
+    if (!res.ok || startData.error) throw Object.assign(new Error(startData.error?.message || 'Veo動画生成の開始に失敗しました'), { status:res.status, provider:'Gemini', body:JSON.stringify(startData) });
+    const operationName = startData.name || startData.operation?.name;
+    if (!operationName) throw Object.assign(new Error('Veo動画生成のOperation IDを取得できませんでした。'), { provider:'Gemini', code:'VIDEO_OPERATION_MISSING', noRetry:true });
+
+    // 動画生成はサーバー側の長時間処理。完了まで一定間隔でOperationを確認する。
+    const startedAt = Date.now();
+    const maxWait = 20 * 60 * 1000;
+    while (true) {
+      if (signal?.aborted) throw signal.reason || new DOMException('ユーザーにより停止されました。', 'AbortError');
+      if (Date.now() - startedAt > maxWait) throw Object.assign(new DOMException('動画生成が制限時間を超えました。', 'TimeoutError'), { provider:'Gemini', code:'VIDEO_POLL_TIMEOUT', noRetry:true });
+
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(resolve, 10000);
+        if (signal) signal.addEventListener('abort', () => { clearTimeout(timer); reject(signal.reason || new DOMException('ユーザーにより停止されました。', 'AbortError')); }, { once:true });
+      });
+
+      const statusRes = await fetchWithTimeout(`${base}/${operationName}?key=${encodeURIComponent(apiKey)}`, {
+        method:'GET', signal, headers:{ 'x-goog-api-key':apiKey }
+      }, 60000);
+      const status = await statusRes.json();
+      if (!statusRes.ok || status.error) throw Object.assign(new Error(status.error?.message || 'Veo動画生成の状態取得に失敗しました'), { status:statusRes.status, provider:'Gemini', body:JSON.stringify(status) });
+      if (!status.done) continue;
+      if (status.error) throw Object.assign(new Error(status.error.message || 'Veo動画生成に失敗しました'), { status:status.error.code || 500, provider:'Gemini', body:JSON.stringify(status), noRetry:true });
+
+      const sample = status.response?.generateVideoResponse?.generatedSamples?.[0]
+        || status.response?.generatedVideos?.[0]
+        || status.response?.generatedSamples?.[0];
+      const video = sample?.video || sample;
+      const videoUri = video?.uri || video?.url;
+      if (!videoUri) throw Object.assign(new Error('Veo動画の完成データURLを取得できませんでした。'), { provider:'Gemini', code:'VIDEO_URI_MISSING', noRetry:true });
+
+      const videoRes = await fetchWithTimeout(videoUri, { method:'GET', signal, headers:{ 'x-goog-api-key':apiKey } }, 180000);
+      if (!videoRes.ok) throw Object.assign(new Error(`生成動画の取得に失敗しました（HTTP ${videoRes.status}）`), { status:videoRes.status, provider:'Gemini', noRetry:true });
+      const blob = await videoRes.blob();
+      const mimeType = blob.type || 'video/mp4';
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+      onDelta('');
+      onMedia([{ kind:'video', mimeType, dataUrl }]);
+      return;
+    }
   },
 
   // Gemini Interactions API: previous_interaction_id で会話継続をサーバー側に任せる（store:trueで保持）。
@@ -1310,6 +1323,9 @@ const ProviderService = {
     onDelta(text);
     if (media.length && onMedia) onMedia(media);
     if (data.id && onInteractionId) onInteractionId(data.id);
+    if (detectGeminiGenerationType(model) === 'image' && promptRequestsMedia(prompt, 'image') && media.length === 0) {
+      throw createMediaGenerationError('image', model);
+    }
   },
 
   async sendClaudeCode({ endpoint, apiKey, model, systemPrompt, history, prompt, attachments, useThinking, signal, onDelta }) {
@@ -1363,6 +1379,8 @@ function MapProviderError(error) {
   // ユーザーが停止ボタンを押した場合はname==='AbortError'になり、こちらとは区別される。
   if (error?.name === 'TimeoutError') return { code:'TIMEOUT', message:'応答がありませんでした（タイムアウト）。通信状況を確認するか、しばらくしてから再試行してください。' };
   if (error?.name === 'AbortError') return { code:'ABORTED', message:'処理を停止しました。' };
+  if (error?.code === 'MEDIA_NOT_RETURNED') return { code:'MEDIA_NOT_RETURNED', message:error.message || '生成データが返りませんでした。' };
+  if (error?.code === 'VIDEO_OPERATION_MISSING' || error?.code === 'VIDEO_URI_MISSING') return { code:'VIDEO_GENERATION_ERROR', message:error.message || '動画生成データを取得できませんでした。' };
 
   if (status === 401) return { code:'AUTH_ERROR', message:'APIキーが無効です。APIキーを確認してください。' };
   if (status === 403) return { code:'AUTH_ERROR', message:'APIキーへのアクセスが拒否されました。権限設定やIP制限を確認してください。' };
@@ -1692,55 +1710,52 @@ const UI = {
   removeAttachment(idx = 0) { AppState.attachedFiles.splice(idx, 1); this.renderAttachmentChips(); },
 
   renderResponseText(text = '') {
-    const resBox = document.getElementById('response-box');
-    const linksHeader = document.getElementById('links-header');
-    const urlRegex = /(https?:\/\/[^\s]+)/g;
-    const matches = text.match(urlRegex);
-    if (matches && matches.length > 0) {
-      linksHeader.innerHTML = '';
-      [...new Set(matches)].forEach(url => {
-        const a = document.createElement('a');
-        a.href = url; a.rel = 'noopener noreferrer'; a.className = 'extracted-link';
-        a.textContent = `🔗 ${url.length > 30 ? url.substring(0,30) + '...' : url}`;
-        if (AppState.openLinksExternally) {
-          a.target = '_blank'; // JS無効時等のフォールバック用に属性としても残す
-          a.onclick = (e) => { e.preventDefault(); openUrlExternally(url); };
-          // Capacitorが無い通常のブラウザ／WebViewでも、クリックイベント起点でopenUrlExternally()を
-          // 呼ぶことで確実に外部へ遷移させる（target="_blank"のネイティブ遷移だけに頼らない）。
-        } else { a.target = '_self'; }
-        linksHeader.appendChild(a);
-      });
-      linksHeader.hidden = false;
-    } else { linksHeader.hidden = true; linksHeader.innerHTML = ''; }
-    resBox.textContent = text;
+    document.getElementById('response-box').textContent = text;
   },
 
   // Gemini等がテキスト以外（画像/音声/動画/ドキュメント）を返した場合の表示。
   // opts.silent=true（履歴復元時など）では、生成完了の「キック」演出を出さない。
-  renderResponseMedia(media = [], opts = {}) {
+  async renderResponseMedia(media = [], opts = {}) {
     const box = document.getElementById('response-media');
     box.innerHTML = '';
     if (!media || !media.length) { box.hidden = true; return; }
+    const loadPromises = [];
     media.forEach((item, idx) => {
-      const src = item.dataUrl || item.uri;
+      const src = item.dataUrl;
       if (!src) return;
       const wrap = document.createElement('div');
       wrap.className = 'response-media-item';
       let el;
-      if (item.kind === 'image') { el = document.createElement('img'); el.src = src; el.alt = 'Gemini生成画像'; }
-      else if (item.kind === 'audio') { el = document.createElement('audio'); el.src = src; el.controls = true; }
-      else if (item.kind === 'video') { el = document.createElement('video'); el.src = src; el.controls = true; }
-      else { el = document.createElement('a'); el.href = src; el.className = 'media-file-link'; el.textContent = `📄 ${item.mimeType || 'ファイル'}を開く`; if (item.uri) { el.target = '_blank'; el.rel = 'noopener noreferrer'; el.onclick = (e) => { e.preventDefault(); openUrlExternally(src); }; } }
+      if (item.kind === 'image') {
+        el = document.createElement('img'); el.src = src; el.alt = 'Gemini生成画像';
+        loadPromises.push(new Promise(resolve => {
+          if (el.complete && el.naturalWidth > 0) return resolve();
+          el.onload = () => resolve(); el.onerror = () => resolve();
+        }));
+      }
+      else if (item.kind === 'audio') {
+        el = document.createElement('audio'); el.src = src; el.controls = true;
+        loadPromises.push(new Promise(resolve => { el.onloadeddata = () => resolve(); el.onerror = () => resolve(); }));
+      }
+      else if (item.kind === 'video') {
+        el = document.createElement('video'); el.src = src; el.controls = true;
+        loadPromises.push(new Promise(resolve => { el.onloadedmetadata = () => resolve(); el.onerror = () => resolve(); }));
+      }
+      else { el = document.createElement('div'); el.textContent = `📄 ${item.mimeType || 'ファイル'}（外部ファイルは表示しません）`; el.className = 'media-file-link-disabled'; }
       wrap.appendChild(el);
-      const dlBtn = document.createElement('button');
-      dlBtn.type = 'button';
-      dlBtn.className = 'media-download-btn';
-      dlBtn.textContent = '⬇ ダウンロード';
-      dlBtn.onclick = (e) => { e.stopPropagation(); downloadMediaItem(item, idx); };
-      wrap.appendChild(dlBtn);
+      if (item.dataUrl) {
+        const dlBtn = document.createElement('button');
+        dlBtn.type = 'button';
+        dlBtn.className = 'media-download-btn';
+        dlBtn.textContent = '⬇ ダウンロード';
+        dlBtn.onclick = (e) => { e.stopPropagation(); downloadMediaItem(item, idx); };
+        wrap.appendChild(dlBtn);
+      }
       box.appendChild(wrap);
     });
     box.hidden = false;
+    // DOMへの挿入だけでなく、ブラウザ側がメディアをロードできたところまで待つ。
+    if (loadPromises.length) await Promise.all(loadPromises);
     if (!opts.silent) {
       // 生成完了を視覚的に知らせる「キック」演出（テキストと違い非ストリーミングで一括到着するため、
       // 何も起きていないように見えてしまうのを防ぐ目的）。
@@ -1811,7 +1826,7 @@ const UI = {
     body.innerHTML = `
       <button type="button" class="drawer-back" data-back="root"><span class="drawer-icon">${DRAWER_ICONS.chevronLeft}</span><span class="label">戻る</span></button>
       <div class="drawer-submenu-title">${escapeHtml(cat.title)}</div>
-      <div class="drawer-categories">${rows}</div>
+      <div class="drawer-categories${key === 'chatSettings' ? ' drawer-chat-settings' : ''}">${rows}</div>
       ${moreHtml}
     `;
   },
@@ -1852,7 +1867,6 @@ const UI = {
     AppState.lastResponse = req.AIOutput || '';
     localStorage.setItem('favhub_last_response', AppState.lastResponse);
     document.getElementById('output-panel').classList.add('expanded');
-    document.getElementById('links-header').hidden = true;
     document.getElementById('response-box').textContent = lines;
     setRequestState('Ready');
     closeModal('history-modal');
@@ -1912,10 +1926,6 @@ const UI = {
     document.getElementById('immersive-motion-os-note').hidden = !osReduceMotion;
     document.getElementById('immersive-delay-input').value = String(Math.round(AppState.ImmersiveViewDelay / 1000));
   },
-  populateLinksForm() {
-    const openLinksToggle = document.getElementById('open-links-externally-toggle');
-    if (openLinksToggle) openLinksToggle.checked = !!AppState.openLinksExternally;
-  },
   populateTextsForm() {
     SERVICES.forEach(service => {
       document.getElementById(`initial-texts-${service}-input`).value = (AppState.initialTexts[service] || []).join('\n');
@@ -1945,6 +1955,15 @@ const UI = {
     const drawer = document.getElementById('drawer');
     const menuBtn = document.getElementById('menu-btn');
     const closeDrawer = () => { drawer.classList.remove('open'); drawer.setAttribute('aria-hidden','true'); menuBtn.setAttribute('aria-expanded','false'); };
+    document.getElementById('internal-browser-close').onclick = closeApiConsoleBrowser;
+    document.getElementById('internal-browser-overlay').addEventListener('click', (e) => {
+      if (e.target.id === 'internal-browser-overlay') closeApiConsoleBrowser();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && document.getElementById('internal-browser-overlay').style.display === 'flex') {
+        closeApiConsoleBrowser();
+      }
+    });
     menuBtn.onclick = () => {
       const open = drawer.classList.toggle('open');
       drawer.setAttribute('aria-hidden', String(!open));
@@ -1977,10 +1996,13 @@ const UI = {
       if (a === 'persona') { this.populatePersonaForm(); openModal('persona-modal'); }
       if (a === 'hcontext') { this.renderHierarchicalContextForm(); openModal('hcontext-modal'); }
       if (a === 'immersive-settings') { this.populateImmersiveForm(); openModal('immersive-modal'); }
-      if (a === 'links') { this.populateLinksForm(); openModal('links-modal'); }
       if (a === 'texts') { this.populateTextsForm(); openModal('texts-modal'); }
       if (a === 'backup') { openModal('backup-modal'); }
-      if (a === 'api') { openUrlExternally(AppState.modelConfig[AppState.CurrentAIModel.service].apiConsoleUrl); }
+      if (a === 'api') {
+        const service = AppState.CurrentAIModel.service;
+        const cfg = AppState.modelConfig[service];
+        openApiConsoleBrowser(cfg?.apiConsoleUrl, service);
+      }
     });
 
     /* --- 没入表示: タップで入室/退室をトグル ---
@@ -2041,7 +2063,6 @@ const UI = {
     /* --- 出力パネル：枠内タップで全文表示/折りたたみ（ImmersiveViewのタップ開閉と一貫させる） --- */
     const outputPanelEl = document.getElementById('output-panel');
     outputPanelEl.addEventListener('click', (e) => {
-      if (e.target.closest('a')) return; // リンクタップは通常の遷移を優先させる
       if (e.target.closest('#regenerate-btn')) return; // 再読み込みボタンは別処理
       const isExpanding = !outputPanelEl.classList.contains('expanded');
       outputPanelEl.classList.toggle('expanded');
@@ -2049,8 +2070,7 @@ const UI = {
         const lines = (AppState.conversationHistory && AppState.conversationHistory.length)
           ? AppState.conversationHistory.map(h => `${h.role === 'user' ? '🧑 あなた' : `🤖 ${h.provider || 'AI'}`}\n${h.content}`).join('\n\n----------\n\n')
           : (AppState.lastResponse || 'まだやり取りがありません。');
-        document.getElementById('links-header').hidden = true;
-        document.getElementById('response-box').textContent = lines;
+            document.getElementById('response-box').textContent = lines;
       } else {
         this.renderResponseText(AppState.lastResponse);
       }
@@ -2277,14 +2297,6 @@ const UI = {
       closeModal('immersive-modal');
     };
 
-    document.getElementById('links-close-btn').onclick = () => closeModal('links-modal');
-    document.getElementById('links-save-btn').onclick = () => {
-      const openLinksToggle = document.getElementById('open-links-externally-toggle');
-      AppState.openLinksExternally = openLinksToggle ? openLinksToggle.checked : true;
-      localStorage.setItem('favhub_open_links_externally', String(AppState.openLinksExternally));
-      closeModal('links-modal');
-    };
-
     document.getElementById('texts-close-btn').onclick = () => closeModal('texts-modal');
     document.getElementById('reset-texts-btn').onclick = () => {
       SERVICES.forEach(service => {
@@ -2351,7 +2363,6 @@ const UI = {
     clearImmersiveTimer(); ExitImmersiveView();
 
     this.showOutputPanel();
-    document.getElementById('links-header').hidden = true;
     AppState.CurrentRequestContent = text;
     AppState.CurrentAIOutput = '';
     AppState.CurrentAIOutputMedia = [];
@@ -2388,8 +2399,14 @@ const UI = {
     AppState.abortController = new AbortController();
     const attachmentsToSend = [...AppState.attachedFiles];
     let output = '';
+    let mediaRenderPromise = Promise.resolve();
+    const generationType = service === 'Gemini' ? detectGeminiGenerationType(modelDef.name) : 'text';
+    AppState.CurrentGenerationType = generationType;
     const onDelta = (delta) => { output += delta; AppState.CurrentAIOutput = output; this.renderResponseText(output); };
-    const onMedia = (media) => { AppState.CurrentAIOutputMedia = media; this.renderResponseMedia(media); };
+    const onMedia = (media) => {
+      AppState.CurrentAIOutputMedia = Array.isArray(media) ? media : [];
+      mediaRenderPromise = this.renderResponseMedia(AppState.CurrentAIOutputMedia);
+    };
 
     try {
       const common = { endpoint: cfg.endpoint, apiKey, model: modelDef.name, systemPrompt, history: recentExchanges, prompt: text, attachments: attachmentsToSend, signal: AppState.abortController.signal, onDelta };
@@ -2410,7 +2427,7 @@ const UI = {
         try { await callProvider(); break; }
         catch (err) {
           // タイムアウト（一時的な通信の詰まりの可能性がある）も503/5xxと同様に自動リトライ対象に含める
-          const retryable = err?.name !== 'AbortError' && (err?.name === 'TimeoutError' || err?.status === 503 || err?.status >= 500 || /overloaded|high demand|temporarily unavailable/i.test(err?.message || ''));
+          const retryable = !err?.noRetry && generationType === 'text' && err?.name !== 'AbortError' && (err?.name === 'TimeoutError' || err?.status === 503 || err?.status >= 500 || /overloaded|high demand|temporarily unavailable/i.test(err?.message || ''));
           if (!retryable || attempt >= MAX_RETRIES) throw err;
           output = ''; AppState.CurrentAIOutput = '';
           AppState.CurrentAIOutputMedia = []; this.renderResponseMedia([]);
@@ -2420,6 +2437,8 @@ const UI = {
         }
       }
 
+      // Providerのレスポンス完了後、メディアがDOMへ入りブラウザ側でロード可能になるまで完了表示を保留する。
+      await mediaRenderPromise;
       WaitingTextManager.stop(); this.setWaitingText(''); stopBtn.hidden = true; sendBtn.disabled = false;
       regenerateBtn.disabled = false; regenerateBtn.classList.remove('spinning');
 
@@ -2487,7 +2506,10 @@ const UI = {
         }
       } else {
         setRequestState('Failed');
-        this.renderResponseText(output ? `${output}\n\n⚠️ 【${service} エラー】\n${mapped.message}` : `⚠️ 【${service} エラー】\n${mapped.message}`);
+        const detail = error?.code === 'MEDIA_NOT_RETURNED'
+          ? `${mapped.message}\n\n生成データが届く前に完了扱いにせず、今回は処理を終了しました。自動再生成は行っていません。`
+          : mapped.message;
+        this.renderResponseText(output ? `${output}\n\n⚠️ 【${service} エラー】\n${detail}` : `⚠️ 【${service} エラー】\n${detail}`);
       }
     } finally { AppState.abortController = null; }
   },
@@ -2513,6 +2535,7 @@ const UI = {
     this.renderHierarchicalContextForm();
 
     AppState.firstResponseReceived = false;
+AppState.CurrentGenerationType = 'text';
     AppState.lastResponse = ''; localStorage.removeItem('favhub_last_response');
     AppState.attachedFiles = [];
     AppState.CurrentAIOutputMedia = []; this.renderResponseMedia([]);
@@ -2529,6 +2552,60 @@ const UI = {
     InitialTextManager.startRotation((text) => { document.getElementById('response-box').textContent = text; });
   }
 };
+
+function openApiConsoleBrowser(url, service = '') {
+  if (!url) return;
+  const overlay = document.getElementById('internal-browser-overlay');
+  const title = document.getElementById('internal-browser-title');
+  const message = document.getElementById('api-launcher-message');
+  const urlBox = document.getElementById('api-launcher-url');
+  const openBtn = document.getElementById('api-console-open-btn');
+  if (!overlay || !openBtn) return;
+
+  const serviceLabel = service || 'API';
+  title.textContent = `${serviceLabel} APIコンソール`;
+  message.textContent = `${serviceLabel} のAPIキーを確認・発行するページを開きます。ログイン後にAPIキーを設定し、FavHubへ戻ってください。`;
+  urlBox.textContent = url;
+  openBtn.onclick = () => openApiConsoleUrl(url);
+
+  overlay.style.display = 'flex';
+  overlay.setAttribute('aria-hidden', 'false');
+  document.body.style.overflow = 'hidden';
+}
+
+/*
+ * 外部ページはCapacitor Browserを優先して開く。
+ * Browserプラグインが未導入/実行に失敗した場合だけ同一WebViewへフォールバックする。
+ * target=_blank / window.open は使わない（HTMLtoAPKBuilder環境でアプリ終了につながるため）。
+ */
+async function openApiConsoleUrl(url) {
+  if (!url) return;
+  closeApiConsoleBrowser();
+  try {
+    const Browser = globalThis.Capacitor?.Plugins?.Browser || globalThis.Browser;
+    if (Browser?.open) {
+      await Browser.open({ url, presentationStyle: 'popover' });
+      return;
+    }
+  } catch (e) {
+    console.warn('Capacitor Browser.open failed; falling back to in-app navigation:', e);
+  }
+  try {
+    window.location.href = url;
+  } catch (e) {
+    console.warn('In-app navigation failed:', e);
+  }
+}
+
+function closeApiConsoleBrowser() {
+  const overlay = document.getElementById('internal-browser-overlay');
+  const openBtn = document.getElementById('api-console-open-btn');
+  if (!overlay) return;
+  overlay.style.display = 'none';
+  overlay.setAttribute('aria-hidden', 'true');
+  if (openBtn) openBtn.onclick = null;
+  document.body.style.overflow = '';
+}
 
 function autosize() {
   const el = document.getElementById('user-input');
