@@ -34,8 +34,10 @@ button { cursor:pointer; }
            ├─ .topbar        flex:0 0 auto（常に自然な高さで確保）
            ├─ .stage-spacer  flex:1 1 auto, min-height:0（可変領域。ここが縮む）
            ├─ .output-panel  flex:0 1 auto（伸びるが、超えたら自身がshrinkできる。
-           │                  実際の中身は.ai-outputがmax-height+overflow-y:autoで
-           │                  内部スクロールするので、通常はここまで縮む前に収まる）
+           │                  実際の中身は.ai-output-scrollがmax-height+overflow-y:autoで
+           │                  内部スクロールするので、通常はここまで縮む前に収まる。
+           │                  テキストと生成物(response-media)は同じスクロール領域内で
+           │                  縦に積まれ、別々に高さを取り合わない）
            └─ .command-bar   flex:0 0 auto, flex-shrink:0（絶対に縮まない＝常に完全表示）
    これにより、AI Outputがどれだけ長くなってもCommandBarが押し出されたり
    重なったりすることは構造的に起こらない。 */
@@ -94,16 +96,30 @@ button { cursor:pointer; }
 @keyframes outputReloadSpin { from { transform:rotate(0deg); } to { transform:rotate(360deg); } }
 .eyebrow { display:block; font-size:9px; letter-spacing:.20em; color:rgba(255,255,255,.54); }
 .waiting-text { display:block; margin-top:3px; font-size:11px; color:rgba(255,255,255,.78); }
-.ai-output { flex:1; min-height:0; overflow-y:auto; padding:12px 15px 18px; white-space:pre-wrap; word-break:break-word; line-height:1.7; font-size:13.5px; text-shadow:0 1px 2px rgba(0,0,0,.18); scrollbar-width:thin; }
-/* Gemini等がテキスト以外（画像/音声/動画）を返した場合の表示領域 */
-.response-media { padding:0 15px 14px; display:flex; flex-direction:column; gap:10px; flex-shrink:0; }
+/* .ai-output-scroll がテキストと生成物(response-media)を同じスクロール領域にまとめる。
+   以前は.ai-outputと.response-mediaが別々のflexアイテムとして高さを取り合っており、
+   生成物が増えるとテキスト表示が圧迫・被る原因になっていたため、
+   両方を1つのスクロールコンテナの中の通常の縦積みにして解消する。 */
+.ai-output-scroll { flex:1; min-height:0; overflow-y:auto; scrollbar-width:thin; }
+.ai-output-text { padding:12px 15px 18px; white-space:pre-wrap; word-break:break-word; line-height:1.7; font-size:13.5px; text-shadow:0 1px 2px rgba(0,0,0,.18); }
+/* 生成物は小さなサムネイルのグリッドで表示し、テキストの可読性を妨げないようにする。
+   会話中に何度生成しても、このターン以前の生成物も含めて（チャット単位で）積み上げて表示する。 */
+.response-media { padding:2px 15px 16px; margin:2px 15px 0; border-top:1px dashed rgba(255,255,255,.16); }
 .response-media[hidden] { display:none; }
-.response-media-item { display:flex; flex-direction:column; gap:6px; }
-.response-media .media-file-link-disabled { background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.18); border-radius:10px; padding:8px 10px; font-size:12px; color:rgba(255,255,255,.62); }
-.response-media img, .response-media video { max-width:100%; border-radius:10px; display:block; }
-.response-media audio { width:100%; }
-.media-download-btn { align-self:flex-start; background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.3); border-radius:10px; padding:6px 10px; font-size:11.5px; color:#fff; cursor:pointer; }
-.media-download-btn:active { background:rgba(255,255,255,.2); }
+.response-media-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(76px, 1fr)); gap:8px; margin-top:10px; }
+.response-media-item { position:relative; width:100%; }
+.response-media-thumb { width:100%; height:76px; padding:0; border-radius:10px; overflow:hidden; border:1px solid rgba(255,255,255,.22); background:rgba(255,255,255,.06); cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:22px; }
+.response-media-thumb img, .response-media-thumb video { width:100%; height:100%; object-fit:cover; display:block; }
+.response-media-dl { position:absolute; right:3px; bottom:3px; width:22px; height:22px; border-radius:50%; background:rgba(10,10,32,.85); border:1px solid rgba(255,255,255,.35); color:#fff; font-size:11px; line-height:1; display:flex; align-items:center; justify-content:center; }
+.media-file-link-disabled { background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.18); border-radius:10px; padding:8px 10px; font-size:12px; color:rgba(255,255,255,.62); }
+
+/* ---------- 生成物の拡大表示（ライトボックス） ---------- */
+.media-lightbox-overlay { position:fixed; inset:0; z-index:190; display:none; align-items:center; justify-content:center; padding:20px; background:rgba(3,3,16,.78); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); }
+.media-lightbox-window { max-width:92vw; max-height:88dvh; display:flex; flex-direction:column; gap:12px; align-items:center; }
+.media-lightbox-content img, .media-lightbox-content video { max-width:92vw; max-height:68dvh; border-radius:14px; box-shadow:var(--shadow); display:block; }
+.media-lightbox-content audio { width:min(92vw, 420px); }
+.media-lightbox-actions { display:flex; gap:8px; }
+.response-media-dl:active { background:rgba(255,255,255,.32); }
 .media-just-generated { animation: mediaGeneratedKick .5s cubic-bezier(.34,1.56,.64,1) both; }
 @keyframes mediaGeneratedKick { 0% { transform:scale(.97); box-shadow:0 0 0 0 rgba(37,99,235,.6); } 60% { transform:scale(1.01); box-shadow:0 0 0 8px rgba(37,99,235,0); } 100% { transform:scale(1); box-shadow:0 0 0 0 rgba(37,99,235,0); } }
 
@@ -260,8 +276,10 @@ button:disabled { opacity:.38; cursor:not-allowed; }
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg>
       </button>
     </div>
-    <div id="response-box" class="ai-output"></div>
-    <div id="response-media" class="response-media" hidden></div>
+    <div id="ai-output-scroll" class="ai-output-scroll">
+      <div id="response-box" class="ai-output-text"></div>
+      <div id="response-media" class="response-media" hidden></div>
+    </div>
   </section>
 
   <footer class="command-bar" aria-label="依頼入力">
@@ -308,6 +326,17 @@ button:disabled { opacity:.38; cursor:not-allowed; }
       <div id="api-launcher-url" class="api-launcher-url"></div>
       <button type="button" id="api-console-open-btn" class="primary-btn api-console-open-btn">APIキー設定ページを開く</button>
       <p class="api-launcher-note">このボタンはCapacitorの外部ブラウザ機能を優先して開きます。端末側で利用できない場合は、FavHubの画面内でそのページへ移動します。</p>
+    </div>
+  </div>
+</div>
+
+<!-- 生成物（画像/音声/動画）の拡大表示 -->
+<div id="media-lightbox-overlay" class="media-lightbox-overlay" role="dialog" aria-modal="true" aria-hidden="true" aria-label="生成物プレビュー">
+  <div class="media-lightbox-window">
+    <div id="media-lightbox-content" class="media-lightbox-content"></div>
+    <div class="media-lightbox-actions">
+      <button type="button" id="media-lightbox-download" class="primary-btn">⬇ ダウンロード</button>
+      <button type="button" id="media-lightbox-close" class="internal-browser-close">閉じる</button>
     </div>
   </div>
 </div>
@@ -698,6 +727,46 @@ function downloadMediaItem(item, idx = 0) {
   document.body.appendChild(a); a.click(); a.remove();
 }
 
+// このチャット（conversationHistory）中に生成された画像/音声/動画/ファイルを、
+// 発言ターンをまたいで1つの一覧にまとめる。新しい生成物が来ても過去の生成物を
+// 消さずに積み上げて表示するために使う（表示用の派生データであり、保存はしない）。
+function buildSessionMediaGallery(history = []) {
+  const gallery = [];
+  (history || []).forEach((h, turnIndex) => {
+    if (h.role !== 'assistant' || !Array.isArray(h.media)) return;
+    h.media.forEach((item, itemIndex) => {
+      if (item && item.dataUrl) gallery.push({ ...item, turnIndex, itemIndex, timestamp: h.timestamp });
+    });
+  });
+  return gallery;
+}
+
+// 生成物を画面いっぱいに拡大表示する（サムネイルタップ時）。
+function openMediaLightbox(item, idx = 0) {
+  const overlay = document.getElementById('media-lightbox-overlay');
+  const content = document.getElementById('media-lightbox-content');
+  const dlBtn = document.getElementById('media-lightbox-download');
+  if (!overlay || !content || !item) return;
+  content.innerHTML = '';
+  let el;
+  if (item.kind === 'image') { el = document.createElement('img'); el.src = item.dataUrl; el.alt = '生成された画像'; }
+  else if (item.kind === 'video') { el = document.createElement('video'); el.src = item.dataUrl; el.controls = true; }
+  else if (item.kind === 'audio') { el = document.createElement('audio'); el.src = item.dataUrl; el.controls = true; }
+  else { el = document.createElement('div'); el.className = 'media-file-link-disabled'; el.textContent = `📄 ${item.mimeType || 'ファイル'}（プレビュー非対応。ダウンロードしてご確認ください）`; }
+  content.appendChild(el);
+  if (dlBtn) dlBtn.onclick = () => downloadMediaItem(item, idx);
+  overlay.style.display = 'flex';
+  overlay.setAttribute('aria-hidden', 'false');
+}
+function closeMediaLightbox() {
+  const overlay = document.getElementById('media-lightbox-overlay');
+  const content = document.getElementById('media-lightbox-content');
+  if (!overlay) return;
+  overlay.style.display = 'none';
+  overlay.setAttribute('aria-hidden', 'true');
+  if (content) content.innerHTML = '';
+}
+
 function compressImage(file, maxWidth = 800, quality = 0.7) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -829,6 +898,21 @@ async function purgeExpiredMedia() {
       log.history.forEach(h => { if (Array.isArray(h.media) && h.media.length) { h.media = []; changed = true; } });
     }
     if (changed) await SaveRequestLog(log);
+  }
+  // 表示中の会話（AppState.conversationHistory、＝今まさに開いているチャット）も、
+  // RequestLogと同じ72時間ルールで生成物だけを間引く。RequestLogはチャットを閉じた後の
+  // 保存分だが、こちらは開いたまま長時間経過したチャットが対象になる。
+  if (typeof AppState !== 'undefined' && Array.isArray(AppState.conversationHistory) && AppState.conversationHistory.length) {
+    let liveChanged = false;
+    AppState.conversationHistory.forEach(h => {
+      if (h.role !== 'assistant' || !Array.isArray(h.media) || !h.media.length) return;
+      const turnTime = new Date(h.timestamp || 0).getTime();
+      if (!turnTime || (now - turnTime) >= MEDIA_RETENTION_MS) { h.media = []; liveChanged = true; }
+    });
+    if (liveChanged) {
+      saveConversationHistory();
+      if (typeof UI !== 'undefined') UI.renderResponseMedia(buildSessionMediaGallery(AppState.conversationHistory), { silent: true });
+    }
   }
   // 表示中の直前の生成物（favhub_last_response_media）も、同じ72時間ルールで破棄する。
   // 記録が無ければ対象外（初回起動時など）。
@@ -1106,33 +1190,6 @@ function geminiModelSupportsImageOutput(model = '') {
   return /image|nano-?banana/i.test(model);
 }
 
-// 生成系モデルを「テキスト / 画像 / 動画」に分け、完了判定をモデル種別に合わせる。
-function detectGeminiGenerationType(model = '') {
-  const name = String(model || '').toLowerCase();
-  if (/veo|video/.test(name)) return 'video';
-  if (geminiModelSupportsImageOutput(name)) return 'image';
-  return 'text';
-}
-
-// ユーザーが実際にメディア生成を依頼しているかを軽く判定する。
-// モデルが画像対応でも、通常の質問まで「画像必須」とは扱わない。
-function promptRequestsMedia(prompt = '', type = 'text') {
-  const text = String(prompt || '').toLowerCase();
-  if (type === 'video') return /動画|ビデオ|映像|ムービー|video|movie|animation|animate|映像を作|動画を作|動画生成|video generation/i.test(text);
-  if (type === 'image') return /画像|イラスト|写真|絵|描い|生成して|作って|image|illustration|picture|photo|draw|generate/i.test(text);
-  return false;
-}
-
-function createMediaGenerationError(type, model) {
-  const label = type === 'video' ? '動画' : '画像';
-  const e = new Error(`${label}生成モデル（${model}）から${label}データが返りませんでした。`);
-  e.provider = 'Gemini';
-  e.code = 'MEDIA_NOT_RETURNED';
-  e.generationType = type;
-  e.noRetry = true;
-  return e;
-}
-
 const ProviderService = {
   // ChatGPT: 仕様書記載の /v1/responses ストリーミング形式が404だったため、
   // 従前どおり /v1/chat/completions の非ストリーミング形式に戻した。
@@ -1159,13 +1216,6 @@ const ProviderService = {
   // Interactions API（/v1beta/interactions, previous_interaction_id）を使う（旧コメントの404は解消済み）。
   async sendGemini({ endpoint, apiKey, model, systemPrompt, history, prompt, attachments, signal, onDelta, onMedia, useInteractionId, previousInteractionId, onInteractionId }) {
     if (useInteractionId) return ProviderService.sendGeminiInteraction({ apiKey, model, systemPrompt, prompt, attachments, previousInteractionId, signal, onDelta, onMedia, onInteractionId });
-
-    const generationType = detectGeminiGenerationType(model);
-    // VeoはgenerateContentではなく長時間実行Operationを使う。
-    if (generationType === 'video') {
-      return ProviderService.sendGeminiVideo({ apiKey, model, prompt, attachments, signal, onDelta, onMedia });
-    }
-
     const url = `${endpoint}/${model}:generateContent?key=${apiKey}`;
     const parts = [];
     let fullPrompt = prompt;
@@ -1177,103 +1227,37 @@ const ProviderService = {
     const historyContents = history.map(h => ({ role: h.role === 'assistant' ? 'model' : 'user', parts:[{ text:h.content }] }));
     const bodyData = { contents: [...historyContents, { role:'user', parts }] };
     if (systemPrompt) bodyData.system_instruction = { parts:[{ text: systemPrompt }] };
+    // Google Search Grounding: 有効時のみ google_search ツールを付与する（generateContentの現行仕様）
     if (AppState.GeminiSearchGroundingEnabled) bodyData.tools = [{ google_search: {} }];
-    if (generationType === 'image') {
+    // 画像生成モデルには明示的に responseModalities: ["TEXT","IMAGE"] を指定しないと、
+    // 実際の画像データを返さず「IMAGE_GENERATION」のようなテキストだけを返すことがある
+    // （Google公式ドキュメントが必須としている設定）。画像出力に対応しないモデルに指定すると
+    // 逆にエラーになるため、モデル名から画像対応と判定できた場合のみ付与する。
+    if (geminiModelSupportsImageOutput(model)) {
       bodyData.generationConfig = { ...(bodyData.generationConfig || {}), responseModalities: ['TEXT', 'IMAGE'] };
     }
+    // FLEX推論: 有効時のみservice_tierを付与する（コスト5割減の代わりに待ち時間が伸び、
+    // 混雑時は503/429で弾かれうるため、タイムアウトも専用の長めの値に切り替える）
     if (AppState.GeminiFlexInferenceEnabled) bodyData.service_tier = 'flex';
     const geminiTimeout = AppState.GeminiFlexInferenceEnabled ? GEMINI_FLEX_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
     const res = await fetchWithTimeout(url, { method:'POST', signal, headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(bodyData) }, geminiTimeout);
     const data = await res.json();
     if (!res.ok || data.error) throw Object.assign(new Error(data.error?.message || 'Gemini API呼び出し失敗'), { status:res.status, provider:'Gemini', body: JSON.stringify(data) });
-
-    // candidates[0]だけでなく、返却された全candidate / 全partを走査してメディアを取りこぼさない。
-    const candidates = Array.isArray(data.candidates) ? data.candidates : [];
+    // 画像生成モデル（nano-banana等）はcandidates[0].content.partsにinline_data（画像等）を返すことがあるため、
+    // textだけでなく全partsを走査してテキストとメディア（画像/音声/動画）を両方拾う。
+    const respParts = data.candidates?.[0]?.content?.parts || [];
     let text = '';
     const media = [];
-    candidates.forEach(candidate => {
-      (candidate?.content?.parts || []).forEach(p => {
-        if (typeof p.text === 'string') { text += p.text; return; }
-        const inline = p.inlineData || p.inline_data;
-        if (inline?.data) {
-          const mimeType = inline.mimeType || inline.mime_type || 'application/octet-stream';
-          media.push({ kind: mediaKindFromMime(mimeType), mimeType, dataUrl:`data:${mimeType};base64,${inline.data}` });
-        }
-      });
+    respParts.forEach(p => {
+      if (typeof p.text === 'string') { text += p.text; return; }
+      const inline = p.inlineData || p.inline_data;
+      if (inline?.data) {
+        const mimeType = inline.mimeType || inline.mime_type || 'application/octet-stream';
+        media.push({ kind: mediaKindFromMime(mimeType), mimeType, dataUrl:`data:${mimeType};base64,${inline.data}` });
+      }
     });
     onDelta(text);
     if (media.length && onMedia) onMedia(media);
-
-    // 明示的な画像生成依頼なのに画像データが0件なら「完了」とは扱わない。
-    // ここでは再試行しない（再生成の重複を避けるため）。
-    if (generationType === 'image' && promptRequestsMedia(prompt, 'image') && media.length === 0) {
-      throw createMediaGenerationError('image', model);
-    }
-  },
-
-  // Veo: predictLongRunning -> Operation polling -> generated video URI download。
-  async sendGeminiVideo({ apiKey, model, prompt, attachments, signal, onDelta, onMedia }) {
-    const base = 'https://generativelanguage.googleapis.com/v1beta';
-    const url = `${base}/models/${model}:predictLongRunning`;
-    let fullPrompt = prompt;
-    const instances = [{ prompt: fullPrompt }];
-    // 現行UIの添付画像を、Veoが受け付けるinlineDataとして可能な範囲で渡す。
-    attachments.filter(a => a.isImage).slice(0, 3).forEach(a => {
-      instances[0].image = { inlineData: { mimeType: a.mimeType, data: a.data.split(',')[1] } };
-    });
-
-    const body = { instances };
-    const res = await fetchWithTimeout(url, {
-      method:'POST', signal,
-      headers:{ 'x-goog-api-key':apiKey, 'Content-Type':'application/json' },
-      body: JSON.stringify(body)
-    }, GEMINI_FLEX_TIMEOUT_MS);
-    const startData = await res.json();
-    if (!res.ok || startData.error) throw Object.assign(new Error(startData.error?.message || 'Veo動画生成の開始に失敗しました'), { status:res.status, provider:'Gemini', body:JSON.stringify(startData) });
-    const operationName = startData.name || startData.operation?.name;
-    if (!operationName) throw Object.assign(new Error('Veo動画生成のOperation IDを取得できませんでした。'), { provider:'Gemini', code:'VIDEO_OPERATION_MISSING', noRetry:true });
-
-    // 動画生成はサーバー側の長時間処理。完了まで一定間隔でOperationを確認する。
-    const startedAt = Date.now();
-    const maxWait = 20 * 60 * 1000;
-    while (true) {
-      if (signal?.aborted) throw signal.reason || new DOMException('ユーザーにより停止されました。', 'AbortError');
-      if (Date.now() - startedAt > maxWait) throw Object.assign(new DOMException('動画生成が制限時間を超えました。', 'TimeoutError'), { provider:'Gemini', code:'VIDEO_POLL_TIMEOUT', noRetry:true });
-
-      await new Promise((resolve, reject) => {
-        const timer = setTimeout(resolve, 10000);
-        if (signal) signal.addEventListener('abort', () => { clearTimeout(timer); reject(signal.reason || new DOMException('ユーザーにより停止されました。', 'AbortError')); }, { once:true });
-      });
-
-      const statusRes = await fetchWithTimeout(`${base}/${operationName}?key=${encodeURIComponent(apiKey)}`, {
-        method:'GET', signal, headers:{ 'x-goog-api-key':apiKey }
-      }, 60000);
-      const status = await statusRes.json();
-      if (!statusRes.ok || status.error) throw Object.assign(new Error(status.error?.message || 'Veo動画生成の状態取得に失敗しました'), { status:statusRes.status, provider:'Gemini', body:JSON.stringify(status) });
-      if (!status.done) continue;
-      if (status.error) throw Object.assign(new Error(status.error.message || 'Veo動画生成に失敗しました'), { status:status.error.code || 500, provider:'Gemini', body:JSON.stringify(status), noRetry:true });
-
-      const sample = status.response?.generateVideoResponse?.generatedSamples?.[0]
-        || status.response?.generatedVideos?.[0]
-        || status.response?.generatedSamples?.[0];
-      const video = sample?.video || sample;
-      const videoUri = video?.uri || video?.url;
-      if (!videoUri) throw Object.assign(new Error('Veo動画の完成データURLを取得できませんでした。'), { provider:'Gemini', code:'VIDEO_URI_MISSING', noRetry:true });
-
-      const videoRes = await fetchWithTimeout(videoUri, { method:'GET', signal, headers:{ 'x-goog-api-key':apiKey } }, 180000);
-      if (!videoRes.ok) throw Object.assign(new Error(`生成動画の取得に失敗しました（HTTP ${videoRes.status}）`), { status:videoRes.status, provider:'Gemini', noRetry:true });
-      const blob = await videoRes.blob();
-      const mimeType = blob.type || 'video/mp4';
-      const dataUrl = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result || ''));
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-      });
-      onDelta('');
-      onMedia([{ kind:'video', mimeType, dataUrl }]);
-      return;
-    }
   },
 
   // Gemini Interactions API: previous_interaction_id で会話継続をサーバー側に任せる（store:trueで保持）。
@@ -1323,9 +1307,6 @@ const ProviderService = {
     onDelta(text);
     if (media.length && onMedia) onMedia(media);
     if (data.id && onInteractionId) onInteractionId(data.id);
-    if (detectGeminiGenerationType(model) === 'image' && promptRequestsMedia(prompt, 'image') && media.length === 0) {
-      throw createMediaGenerationError('image', model);
-    }
   },
 
   async sendClaudeCode({ endpoint, apiKey, model, systemPrompt, history, prompt, attachments, useThinking, signal, onDelta }) {
@@ -1379,8 +1360,6 @@ function MapProviderError(error) {
   // ユーザーが停止ボタンを押した場合はname==='AbortError'になり、こちらとは区別される。
   if (error?.name === 'TimeoutError') return { code:'TIMEOUT', message:'応答がありませんでした（タイムアウト）。通信状況を確認するか、しばらくしてから再試行してください。' };
   if (error?.name === 'AbortError') return { code:'ABORTED', message:'処理を停止しました。' };
-  if (error?.code === 'MEDIA_NOT_RETURNED') return { code:'MEDIA_NOT_RETURNED', message:error.message || '生成データが返りませんでした。' };
-  if (error?.code === 'VIDEO_OPERATION_MISSING' || error?.code === 'VIDEO_URI_MISSING') return { code:'VIDEO_GENERATION_ERROR', message:error.message || '動画生成データを取得できませんでした。' };
 
   if (status === 401) return { code:'AUTH_ERROR', message:'APIキーが無効です。APIキーを確認してください。' };
   if (status === 403) return { code:'AUTH_ERROR', message:'APIキーへのアクセスが拒否されました。権限設定やIP制限を確認してください。' };
@@ -1714,48 +1693,44 @@ const UI = {
   },
 
   // Gemini等がテキスト以外（画像/音声/動画/ドキュメント）を返した場合の表示。
+  // 渡す media は通常、buildSessionMediaGallery()で作ったチャット単位の累積一覧
+  // （このターンだけでなく過去のターン分も含む）。小さなサムネイル+DLボタンのグリッドで表示し、
+  // テキスト（.ai-output-text）の可読性を妨げないようにする。タップで拡大表示（ライトボックス）。
   // opts.silent=true（履歴復元時など）では、生成完了の「キック」演出を出さない。
-  async renderResponseMedia(media = [], opts = {}) {
+  renderResponseMedia(media = [], opts = {}) {
     const box = document.getElementById('response-media');
     box.innerHTML = '';
     if (!media || !media.length) { box.hidden = true; return; }
-    const loadPromises = [];
+    const grid = document.createElement('div');
+    grid.className = 'response-media-grid';
     media.forEach((item, idx) => {
-      const src = item.dataUrl;
-      if (!src) return;
+      if (!item?.dataUrl) return;
       const wrap = document.createElement('div');
       wrap.className = 'response-media-item';
-      let el;
-      if (item.kind === 'image') {
-        el = document.createElement('img'); el.src = src; el.alt = 'Gemini生成画像';
-        loadPromises.push(new Promise(resolve => {
-          if (el.complete && el.naturalWidth > 0) return resolve();
-          el.onload = () => resolve(); el.onerror = () => resolve();
-        }));
-      }
-      else if (item.kind === 'audio') {
-        el = document.createElement('audio'); el.src = src; el.controls = true;
-        loadPromises.push(new Promise(resolve => { el.onloadeddata = () => resolve(); el.onerror = () => resolve(); }));
-      }
-      else if (item.kind === 'video') {
-        el = document.createElement('video'); el.src = src; el.controls = true;
-        loadPromises.push(new Promise(resolve => { el.onloadedmetadata = () => resolve(); el.onerror = () => resolve(); }));
-      }
-      else { el = document.createElement('div'); el.textContent = `📄 ${item.mimeType || 'ファイル'}（外部ファイルは表示しません）`; el.className = 'media-file-link-disabled'; }
-      wrap.appendChild(el);
-      if (item.dataUrl) {
-        const dlBtn = document.createElement('button');
-        dlBtn.type = 'button';
-        dlBtn.className = 'media-download-btn';
-        dlBtn.textContent = '⬇ ダウンロード';
-        dlBtn.onclick = (e) => { e.stopPropagation(); downloadMediaItem(item, idx); };
-        wrap.appendChild(dlBtn);
-      }
-      box.appendChild(wrap);
+
+      const thumb = document.createElement('button');
+      thumb.type = 'button';
+      thumb.className = 'response-media-thumb';
+      thumb.setAttribute('aria-label', '生成物を拡大表示');
+      if (item.kind === 'image') { const img = document.createElement('img'); img.src = item.dataUrl; img.alt = '生成された画像'; thumb.appendChild(img); }
+      else if (item.kind === 'video') { const vid = document.createElement('video'); vid.src = item.dataUrl; vid.muted = true; thumb.appendChild(vid); }
+      else if (item.kind === 'audio') { thumb.textContent = '🎵'; }
+      else { thumb.textContent = '📄'; }
+      thumb.onclick = () => openMediaLightbox(item, idx);
+      wrap.appendChild(thumb);
+
+      const dlBtn = document.createElement('button');
+      dlBtn.type = 'button';
+      dlBtn.className = 'response-media-dl';
+      dlBtn.setAttribute('aria-label', 'ダウンロード');
+      dlBtn.textContent = '⬇';
+      dlBtn.onclick = (e) => { e.stopPropagation(); downloadMediaItem(item, idx); };
+      wrap.appendChild(dlBtn);
+
+      grid.appendChild(wrap);
     });
+    box.appendChild(grid);
     box.hidden = false;
-    // DOMへの挿入だけでなく、ブラウザ側がメディアをロードできたところまで待つ。
-    if (loadPromises.length) await Promise.all(loadPromises);
     if (!opts.silent) {
       // 生成完了を視覚的に知らせる「キック」演出（テキストと違い非ストリーミングで一括到着するため、
       // 何も起きていないように見えてしまうのを防ぐ目的）。
@@ -1852,15 +1827,16 @@ const UI = {
     saveGeminiInteractionId();
     document.getElementById('user-input').value = '';
     autosize();
-    // 生成物（画像/音声/動画/ファイル）も、履歴の最後のRequestLog（AIOutputMedia）か、
-    // 会話履歴中の最後のassistantメッセージ（media）のいずれかから復元する（再送信不要にするため）。
-    const restoredMedia = Array.isArray(req.AIOutputMedia) && req.AIOutputMedia.length
+    // 生成物（画像/音声/動画/ファイル）は、このチャットの会話履歴全体（全ターン）から
+    // 累積ギャラリーとして復元する（過去ターン分も含めて表示を維持するため）。
+    const sessionMedia = buildSessionMediaGallery(AppState.conversationHistory);
+    const lastTurnMedia = Array.isArray(req.AIOutputMedia) && req.AIOutputMedia.length
       ? req.AIOutputMedia
       : ([...AppState.conversationHistory].reverse().find(h => h.role === 'assistant' && Array.isArray(h.media) && h.media.length)?.media || []);
-    AppState.CurrentAIOutputMedia = restoredMedia;
-    AppState.lastResponseMedia = restoredMedia;
-    if (restoredMedia.length) saveLastResponseMedia(restoredMedia); else clearLastResponseMedia();
-    this.renderResponseMedia(restoredMedia, { silent: true });
+    AppState.CurrentAIOutputMedia = lastTurnMedia;
+    AppState.lastResponseMedia = sessionMedia;
+    if (sessionMedia.length) saveLastResponseMedia(sessionMedia); else clearLastResponseMedia();
+    this.renderResponseMedia(sessionMedia, { silent: true });
     AppState.firstResponseReceived = true;
     this.showOutputPanel();
     const lines = AppState.conversationHistory.map(h => `${h.role === 'user' ? '🧑 あなた' : `🤖 ${h.provider || 'AI'}`}\n${h.content}`).join('\n\n----------\n\n');
@@ -1946,9 +1922,10 @@ const UI = {
       AppState.firstResponseReceived = true;
       this.showOutputPanel();
       this.renderResponseText(AppState.lastResponse);
-      // アプリ再起動後も、直前に生成された画像/音声/動画/ファイルの表示を保つ
+      // アプリ再起動後も、このチャットで生成された画像/音声/動画/ファイルを
+      // 全ターン分まとめて（累積ギャラリーとして）表示を保つ
       AppState.CurrentAIOutputMedia = AppState.lastResponseMedia || [];
-      this.renderResponseMedia(AppState.CurrentAIOutputMedia, { silent: true });
+      this.renderResponseMedia(buildSessionMediaGallery(AppState.conversationHistory), { silent: true });
     }
 
     /* --- ハンバーガーメニュー（ドロワー） --- */
@@ -1959,9 +1936,16 @@ const UI = {
     document.getElementById('internal-browser-overlay').addEventListener('click', (e) => {
       if (e.target.id === 'internal-browser-overlay') closeApiConsoleBrowser();
     });
+    document.getElementById('media-lightbox-close').onclick = closeMediaLightbox;
+    document.getElementById('media-lightbox-overlay').addEventListener('click', (e) => {
+      if (e.target.id === 'media-lightbox-overlay') closeMediaLightbox();
+    });
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && document.getElementById('internal-browser-overlay').style.display === 'flex') {
         closeApiConsoleBrowser();
+      }
+      if (e.key === 'Escape' && document.getElementById('media-lightbox-overlay').style.display === 'flex') {
+        closeMediaLightbox();
       }
     });
     menuBtn.onclick = () => {
@@ -2365,8 +2349,9 @@ const UI = {
     this.showOutputPanel();
     AppState.CurrentRequestContent = text;
     AppState.CurrentAIOutput = '';
+    // このターンの生成物データはリセットするが、表示（response-media）はあえてクリアしない。
+    // 過去のターンで生成された画像/音声/動画は、応答待ちの間もそのまま見え続けるようにする。
     AppState.CurrentAIOutputMedia = [];
-    this.renderResponseMedia([]);
     setRequestState('Processing');
     StartIllustrationProcessing();
 
@@ -2399,14 +2384,10 @@ const UI = {
     AppState.abortController = new AbortController();
     const attachmentsToSend = [...AppState.attachedFiles];
     let output = '';
-    let mediaRenderPromise = Promise.resolve();
-    const generationType = service === 'Gemini' ? detectGeminiGenerationType(modelDef.name) : 'text';
-    AppState.CurrentGenerationType = generationType;
     const onDelta = (delta) => { output += delta; AppState.CurrentAIOutput = output; this.renderResponseText(output); };
-    const onMedia = (media) => {
-      AppState.CurrentAIOutputMedia = Array.isArray(media) ? media : [];
-      mediaRenderPromise = this.renderResponseMedia(AppState.CurrentAIOutputMedia);
-    };
+    // onMedia受信時点では、まだそのターンの表示を確定しない
+    // （成功パスでconversationHistoryへpushした後にまとめて累積ギャラリーとして描画する）。
+    const onMedia = (media) => { AppState.CurrentAIOutputMedia = media; };
 
     try {
       const common = { endpoint: cfg.endpoint, apiKey, model: modelDef.name, systemPrompt, history: recentExchanges, prompt: text, attachments: attachmentsToSend, signal: AppState.abortController.signal, onDelta };
@@ -2427,18 +2408,17 @@ const UI = {
         try { await callProvider(); break; }
         catch (err) {
           // タイムアウト（一時的な通信の詰まりの可能性がある）も503/5xxと同様に自動リトライ対象に含める
-          const retryable = !err?.noRetry && generationType === 'text' && err?.name !== 'AbortError' && (err?.name === 'TimeoutError' || err?.status === 503 || err?.status >= 500 || /overloaded|high demand|temporarily unavailable/i.test(err?.message || ''));
+          const retryable = err?.name !== 'AbortError' && (err?.name === 'TimeoutError' || err?.status === 503 || err?.status >= 500 || /overloaded|high demand|temporarily unavailable/i.test(err?.message || ''));
           if (!retryable || attempt >= MAX_RETRIES) throw err;
           output = ''; AppState.CurrentAIOutput = '';
-          AppState.CurrentAIOutputMedia = []; this.renderResponseMedia([]);
+          AppState.CurrentAIOutputMedia = [];
+          // 表示中の累積ギャラリー（過去ターン分）はリトライ中もそのまま見せておく。
           const retryReason = err?.name === 'TimeoutError' ? '応答がなかったため' : '混み合っているため';
           this.setWaitingText(`${retryReason}再試行しています…（${attempt + 1}/${MAX_RETRIES}）`);
           await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
         }
       }
 
-      // Providerのレスポンス完了後、メディアがDOMへ入りブラウザ側でロード可能になるまで完了表示を保留する。
-      await mediaRenderPromise;
       WaitingTextManager.stop(); this.setWaitingText(''); stopBtn.hidden = true; sendBtn.disabled = false;
       regenerateBtn.disabled = false; regenerateBtn.classList.remove('spinning');
 
@@ -2461,6 +2441,9 @@ const UI = {
       AppState.conversationHistory.push({ role:'user', content:text, provider:service, timestamp:now });
       AppState.conversationHistory.push({ role:'assistant', content:body, provider:service, timestamp:now, media: responseMedia });
       saveConversationHistory();
+      // 生成物の表示は、このターンだけでなく会話全体の累積ギャラリーとして更新する
+      // （何度生成しても過去分が消えないようにするため）。
+      this.renderResponseMedia(buildSessionMediaGallery(AppState.conversationHistory));
 
       AppState.lastResponse = body; localStorage.setItem('favhub_last_response', body);
       // 生成物（画像/音声/動画/ファイル）は再送信しなくても復元後に表示され続けるよう永続化する（72時間で自動破棄）
@@ -2502,14 +2485,12 @@ const UI = {
           saveConversationHistory();
           AppState.lastResponseMedia = abortedMedia;
           if (abortedMedia.length) saveLastResponseMedia(abortedMedia);
+          this.renderResponseMedia(buildSessionMediaGallery(AppState.conversationHistory));
           await SaveRequestLog({ RequestId:AppState.CurrentChatId, RequestTitle:(AppState.conversationHistory[0]?.content || text).slice(0,40)||'無題', RequestDate:AppState.conversationHistory[0]?.timestamp || now, RequestUpdatedDate:now, RequestContent:text, AIOutput:output, AIOutputMedia: abortedMedia, service, history: JSON.parse(JSON.stringify(AppState.conversationHistory)) });
         }
       } else {
         setRequestState('Failed');
-        const detail = error?.code === 'MEDIA_NOT_RETURNED'
-          ? `${mapped.message}\n\n生成データが届く前に完了扱いにせず、今回は処理を終了しました。自動再生成は行っていません。`
-          : mapped.message;
-        this.renderResponseText(output ? `${output}\n\n⚠️ 【${service} エラー】\n${detail}` : `⚠️ 【${service} エラー】\n${detail}`);
+        this.renderResponseText(output ? `${output}\n\n⚠️ 【${service} エラー】\n${mapped.message}` : `⚠️ 【${service} エラー】\n${mapped.message}`);
       }
     } finally { AppState.abortController = null; }
   },
@@ -2535,7 +2516,6 @@ const UI = {
     this.renderHierarchicalContextForm();
 
     AppState.firstResponseReceived = false;
-AppState.CurrentGenerationType = 'text';
     AppState.lastResponse = ''; localStorage.removeItem('favhub_last_response');
     AppState.attachedFiles = [];
     AppState.CurrentAIOutputMedia = []; this.renderResponseMedia([]);
