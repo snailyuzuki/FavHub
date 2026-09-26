@@ -290,6 +290,7 @@ button:disabled { opacity:.38; cursor:not-allowed; }
         <div id="attach-select-list" class="attach-select-list" role="menu" hidden>
           <button type="button" role="menuitem" data-attach-type="image">画像</button>
           <button type="button" role="menuitem" data-attach-type="camera">カメラ</button>
+          <button type="button" role="menuitem" data-attach-type="audio">音声（文字起こし用）</button>
           <button type="button" role="menuitem" data-attach-type="file">ファイル</button>
         </div>
       </div>
@@ -403,6 +404,20 @@ button:disabled { opacity:.38; cursor:not-allowed; }
       <span style="font-size:12px; color:#ccc;">FLEX推論（service_tier: flex）を使用する</span>
     </label>
     <div style="font-size:10.5px; color:#888; margin-top:4px;">コストを抑制できる代わりに、応答が大幅に遅くなる（数分〜）可能性があります。混雑時は処理自体が拒否されることもあります（対応モデルのみ有効）。</div>
+
+    <label style="font-size:11px; margin-top:22px; display:block;">音声生成モデルへのVoice指定</label>
+    <input type="text" id="gemini-tts-voice-input" placeholder="例: Kore, Puck, Zephyr...">
+    <div style="font-size:10.5px; color:#888; margin-top:4px;">プリビルドボイス名を指定します（Kore, Puck, Zephyr, Charon など。公式のExtended Voice Libraryのvoice_...IDも指定可)。未入力時はKore。</div>
+    <label style="font-size:11px; margin-top:10px; display:block;">音声生成モデルへのStyle指定</label>
+    <input type="text" id="gemini-tts-style-input" placeholder="例: cheerful and friendly（空欄推奨）">
+    <div style="font-size:10.5px; color:#888; margin-top:4px;">turn全体にかかる話し方の指定です。公式ガイド推奨により、まずは空欄のまま試し、必要な時だけ短く指定してください。</div>
+
+    <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-top:14px;">
+      <input type="checkbox" id="gemini-transcribe-smart-toggle" style="width:16px; height:16px;">
+      <span style="font-size:12px; color:#ccc;">文字起こしモデルでフィラー除去を行う</span>
+    </label>
+    <div style="font-size:10.5px; color:#888; margin-top:4px;">OFFの場合は既定のverbatim（逐語）モードで実行します。</div>
+
     <div class="modal-actions">
       <button id="apiperservice-close-btn">キャンセル</button>
       <button id="apiperservice-save-btn" class="primary-btn">保存</button>
@@ -414,19 +429,19 @@ button:disabled { opacity:.38; cursor:not-allowed; }
 <div id="models-modal" class="modal-overlay">
   <div class="modal-content">
     <h3><span class="drawer-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="10" height="10" rx="1.5"/><path d="M8 2v3M12 2v3M8 15v3M12 15v3M2 8h3M2 12h3M15 8h3M15 12h3"/></svg></span>AIモデル登録</h3>
-    <label>ChatGPT クイックモデル（QuickModel）</label>
+    <label>ChatGPT Daily向けモデル</label>
     <input type="text" id="model-chatgpt-quick" placeholder="例: gpt-5">
-    <label>ChatGPT 日常・深思考モデル（DailyModel）</label>
+    <label>ChatGPT Work向けモデル</label>
     <input type="text" id="model-chatgpt-daily" placeholder="例: gpt-5">
-    <label>Gemini クイックモデル（QuickModel）</label>
+    <label>Gemini Daily向けモデル</label>
     <input type="text" id="model-gemini-quick" placeholder="例: gemini-3.8-flash">
     <div style="font-size:10.5px; color:#888; margin-top:4px;">メディア生成時にはチャット設定よりInteraction IDの有効化を推奨します</div>
-    <label>Gemini 日常・深思考モデル（DailyModel）</label>
+    <label>Gemini Work向けモデル</label>
     <input type="text" id="model-gemini-daily" placeholder="例: gemini-3.1-pro">
     <div style="font-size:10.5px; color:#888; margin-top:4px;">メディア生成時にはチャット設定よりInteraction IDの有効化を推奨します</div>
-    <label>ClaudeCode クイックモデル（QuickModel）</label>
+    <label>ClaudeCode Daily向けモデル</label>
     <input type="text" id="model-claudecode-quick" placeholder="例: claude-haiku-4-5">
-    <label>ClaudeCode 日常・深思考モデル（DailyModel）</label>
+    <label>ClaudeCode Work向けモデル</label>
     <input type="text" id="model-claudecode-daily" placeholder="例: claude-sonnet-5">
     <div class="modal-actions">
       <button id="models-close-btn">キャンセル</button>
@@ -595,8 +610,8 @@ const DEFAULT_MODEL_CONFIG = {
     endpoint: 'https://api.openai.com/v1/chat/completions',
     apiConsoleUrl: 'https://platform.openai.com/api-keys',
     models: {
-      QuickModel: { name: 'gpt-5', label: 'クイック' },
-      DailyModel: { name: 'gpt-5', label: '日常・深思考' }
+      QuickModel: { name: 'gpt-5', label: 'Daily' },
+      DailyModel: { name: 'gpt-5', label: 'Work' }
     }
   },
   Gemini: {
@@ -604,8 +619,8 @@ const DEFAULT_MODEL_CONFIG = {
     endpoint: 'https://generativelanguage.googleapis.com/v1beta/models',
     apiConsoleUrl: 'https://aistudio.google.com/apikey',
     models: {
-      QuickModel: { name: 'gemini-3.8-flash', label: 'クイック' },
-      DailyModel: { name: 'gemini-3.1-pro', label: '日常・深思考' }
+      QuickModel: { name: 'gemini-3.8-flash', label: 'Daily' },
+      DailyModel: { name: 'gemini-3.1-pro', label: 'Work' }
     }
   },
   ClaudeCode: {
@@ -613,8 +628,8 @@ const DEFAULT_MODEL_CONFIG = {
     endpoint: 'https://api.anthropic.com/v1/messages',
     apiConsoleUrl: 'https://console.anthropic.com/settings/keys',
     models: {
-      QuickModel: { name: 'claude-haiku-4-5', label: 'クイック' },
-      DailyModel: { name: 'claude-sonnet-5', label: '日常・深思考' }
+      QuickModel: { name: 'claude-haiku-4-5', label: 'Daily' },
+      DailyModel: { name: 'claude-sonnet-5', label: 'Work' }
     }
   }
 };
@@ -1002,6 +1017,15 @@ const AppState = {
   // コストを抑えられる代わりに応答が遅くなる・sheddable（枠が無ければ弾かれる）可能性がある。
   GeminiFlexInferenceEnabled: localStorage.getItem('favhub_gemini_flex_inference_enabled') === 'true',
 
+  // gemini-3.8-flash-tts / gemini-3.8-flash-lite-tts 等のTTSモデル利用時に使う音声（prebuilt voice名）。
+  // 公式ドキュメントのプリビルドボイス一覧（Kore, Puck, Zephyr...）から指定する。未設定時はKore。
+  GeminiTTSVoice: localStorage.getItem('favhub_gemini_tts_voice') || 'Kore',
+  // 話し方（speech_metadata.style）。空欄なら未指定（公式ガイド推奨：まずstyle無しで試す）。
+  GeminiTTSStyle: localStorage.getItem('favhub_gemini_tts_style') || '',
+
+  // gemini-3.5-transcribe利用時、Smart transcription（フィラー除去・整形）を使うか（デフォルトOFF＝verbatim）。
+  GeminiTranscribeSmartMode: localStorage.getItem('favhub_gemini_transcribe_smart') === 'true',
+
   keys: { ChatGPT:'', Gemini:'', ClaudeCode:'' },
 
   // 挿絵・セリフ設定はペルソナ指示と同様、サービス（ChatGPT/Gemini/ClaudeCode）ごとに保持する
@@ -1298,7 +1322,10 @@ async function providerError(response, provider) {
   return e;
 }
 function buildAttachmentText(attachments = []) {
-  return attachments.filter(a => !a.isImage).map(a => `\n\n【添付ファイル: ${a.name}】\n${a.data}`).join('');
+  // 音声添付はbase64バイナリであり、テキストとしてそのままプロンプトに埋め込むと
+  // 意味を持たない上に無駄にトークンを消費するため除外する（ChatGPT/ClaudeCodeは
+  // 現状この添付を音声として送る手段が無いため、単純に無視する）。
+  return attachments.filter(a => !a.isImage && !a.isAudio).map(a => `\n\n【添付ファイル: ${a.name}】\n${a.data}`).join('');
 }
 // Interaction APIで動画出力を明示する必要があるリクエストかを、モデル名ではなく
 // ユーザーの生成指示から判定する。通常のテキスト会話には影響しない。
@@ -1306,6 +1333,19 @@ function looksLikeVideoGenerationRequest(prompt = '') {
   const text = String(prompt).trim();
   if (!text) return false;
   return /(?:動画|ムービー|映像|ビデオ)\s*(?:を|の)?\s*(?:生成|作成|作って|制作)|(?:generate|create|make|produce)\s+(?:a\s+)?(?:video|movie|clip)|text[- ]to[- ]video/i.test(text);
+}
+// gemini-3.8-flash-tts / gemini-3.8-flash-lite-tts / gemini-3.1-flash-tts-preview 等、
+// 公式ドキュメント（Text-to-speech generation）記載のTTSモデル名を判定する。
+function isGeminiTTSModel(model = '') {
+  return /tts/i.test(String(model));
+}
+// gemini-3.5-transcribe（非ストリーミング）を判定する。gemini-3.5-transcribe-liveは
+// Live API（WebSocket）専用でこのアプリのREST方式では未対応のため区別する。
+function isGeminiTranscribeModel(model = '') {
+  return /transcribe/i.test(String(model)) && !/-live\b/i.test(String(model));
+}
+function isGeminiTranscribeLiveModel(model = '') {
+  return /transcribe/i.test(String(model)) && /-live\b/i.test(String(model));
 }
 
 const ProviderService = {
@@ -1333,15 +1373,24 @@ const ProviderService = {
   // 「Interaction ID（会話継続）を使用する」がON（AppState.GeminiInteractionIdEnabled）の場合は
   // Interactions API（/v1beta/interactions, previous_interaction_id）を使う（旧コメントの404は解消済み）。
   async sendGemini({ endpoint, apiKey, model, systemPrompt, history, prompt, attachments, signal, onDelta, onMedia, useInteractionId, previousInteractionId, onInteractionId }) {
+    if (isGeminiTranscribeLiveModel(model)) {
+      throw Object.assign(new Error('gemini-3.5-transcribe-liveはLive API（WebSocketによるストリーミング）専用モデルのため、このアプリの単発リクエスト方式では利用できません。非ストリーミングのgemini-3.5-transcribeを指定してください。'), { provider:'Gemini' });
+    }
+    // gemini-3.8-flash-tts等のTTSモデルとgemini-3.5-transcribeはInteractions API専用のため、
+    // 「Interaction ID」設定がOFFのまま:generateContentへ送るとAPI側でエラーになる。
+    // ここでは自動フォールバックはせず、設定画面の案内（Interaction IDの有効化を推奨）通りに
+    // ユーザー側でトグルしてもらう前提とする。
     if (useInteractionId) return ProviderService.sendGeminiInteraction({ apiKey, model, systemPrompt, prompt, attachments, previousInteractionId, signal, onDelta, onMedia, onInteractionId });
     const url = `${endpoint}/${model}:generateContent?key=${apiKey}`;
     const parts = [];
     let fullPrompt = prompt;
     attachments.forEach(a => {
-      if (a.isImage) parts.push({ inline_data: { mime_type:a.mimeType, data:a.data.split(',')[1] } });
+      // 音声添付は画像と同様にinline_dataで送る（Gemini Audio understanding。
+      // :generateContentは通常のマルチモーダルモデルでもaudio/*のinline_dataを受け付ける）。
+      if (a.isImage || a.isAudio) parts.push({ inline_data: { mime_type:a.mimeType, data:a.data.split(',')[1] } });
       else fullPrompt += `\n\n【添付ファイル: ${a.name}】\n${a.data}`;
     });
-    parts.push({ text: fullPrompt });
+    if (fullPrompt.trim()) parts.push({ text: fullPrompt });
     const historyContents = history.map(h => ({ role: h.role === 'assistant' ? 'model' : 'user', parts:[{ text:h.content }] }));
     const bodyData = { contents: [...historyContents, { role:'user', parts }] };
     if (systemPrompt) bodyData.system_instruction = { parts:[{ text: systemPrompt }] };
@@ -1389,13 +1438,28 @@ const ProviderService = {
   // このモードではアプリ側からhistoryは送らない（呼び出し元がAIContextを無効化してrecentExchangesを渡さない）。
   async sendGeminiInteraction({ apiKey, model, systemPrompt, prompt, attachments, previousInteractionId, signal, onDelta, onMedia, onInteractionId }) {
     const url = GEMINI_INTERACTIONS_ENDPOINT;
+    const isTTS = isGeminiTTSModel(model);
+    const isTranscribe = isGeminiTranscribeModel(model);
     const inputParts = [];
-    let fullPrompt = prompt;
+    let fullPrompt = prompt || '';
     attachments.forEach(a => {
       if (a.isImage) inputParts.push({ type:'image', data:a.data.split(',')[1], mime_type:a.mimeType });
+      // gemini-3.5-transcribe / 音声理解向け：Interactions APIのAudioContentはimageと同様に
+      // data（base64）+mime_typeのインライン形式を受け付ける（公式リファレンスのAudio Content例に準拠）。
+      else if (a.isAudio) inputParts.push({ type:'audio', data:a.data.split(',')[1], mime_type:a.mimeType });
       else fullPrompt += `\n\n【添付ファイル: ${a.name}】\n${a.data}`;
     });
-    inputParts.push({ type:'text', text: fullPrompt });
+    // TTSモデルはテキストを「読み上げる台本」としてそのまま扱うため、話し方の指定は
+    // 本文中に書かせず speech_metadata アノテーションに分離する（公式移行ガイド準拠）。
+    // 文字起こし（transcribe）はテキスト入力が無くても音声添付のみで送信できるよう、
+    // 空文字のテキストパートは追加しない（音声のみの依頼を許容する）。
+    if (fullPrompt.trim() || (!isTranscribe && inputParts.length === 0)) {
+      const textPart = { type: 'text', text: fullPrompt };
+      if (isTTS) {
+        textPart.annotations = [{ type: 'speech_metadata', style: (AppState.GeminiTTSStyle || '').trim() || undefined }];
+      }
+      inputParts.push(textPart);
+    }
     const bodyData = { model, input: inputParts, store: true };
     // Interaction ID経由のリクエストでは、モデルの種類を問わずカスタム指示（system_instruction）を送らない。
     // Gemini Omni Flash（動画生成）だけでなく、画像/音声生成モデルでもInteraction ID利用時は
@@ -1405,7 +1469,13 @@ const ProviderService = {
     // Interactions APIではメディア出力を response_format で明示する。
     // 画像は既存の画像対応モデル向け設定を維持する。
     // 動画はモデル名で自動ルーティングせず、ユーザーが動画生成を明示した場合だけ要求する。
-    if (/image|nano-?banana/i.test(model)) {
+    if (isTTS) {
+      // 公式ガイド（Text-to-speech generation）準拠：response_format:{type:"audio"}と、
+      // generation_config.speech_configにprebuilt voice名を1件指定する単一話者形式。
+      bodyData.response_format = { type: 'audio' };
+    } else if (isTranscribe) {
+      // 文字起こしはテキスト出力のみで、response_formatの指定は不要（既定でtext）。
+    } else if (/image|nano-?banana/i.test(model)) {
       // 公式仕様のresponse_formatは画像生成の場合も単一オブジェクト（{type:'image', ...}）で、
       // {type:'text'}と{type:'image'}を並べた配列という形はドキュメントのどの例にも存在しない。
       // 不正な形状を送るとresponse_formatごと無視される/エラーになる恐れがあるため、
@@ -1417,8 +1487,28 @@ const ProviderService = {
       // 無視され、動画を要求したのにテキストのみが返る不具合の原因になっていたため削除。
       bodyData.response_format = { type: 'video' };
     }
-    // Google Search Grounding: 有効時のみ google_search ツールを付与する（Interactions APIのTool仕様）
-    if (AppState.GeminiSearchGroundingEnabled) bodyData.tools = [{ type: 'google_search' }];
+    // TTS: generation_config.speech_configに単一話者のprebuilt voiceを指定する
+    // （公式ドキュメントのシングルスピーカー例に準拠。配列1件で単一話者を表す）。
+    if (isTTS) {
+      bodyData.generation_config = {
+        ...(bodyData.generation_config || {}),
+        speech_config: [{ voice: AppState.GeminiTTSVoice || 'Kore' }]
+      };
+    }
+    // 文字起こし: 既定は自動言語検出・verbatimモード。Smart transcriptionが有効な場合のみ
+    // mode:"smart"を指定する（disfluency除去・整形。word timestamp/diarizationとは併用不可のため
+    // このアプリでは未対応とし、シンプルな全文文字起こしのみをサポートする）。
+    if (isTranscribe) {
+      bodyData.generation_config = {
+        ...(bodyData.generation_config || {}),
+        transcription_config: AppState.GeminiTranscribeSmartMode
+          ? { mode: 'smart' }
+          : { language_codes: [] }
+      };
+    }
+    // Google Search Grounding: 有効時のみ google_search ツールを付与する（Interactions APIのTool仕様）。
+    // TTS/transcribeは検索ツール・関数呼び出し等を一切サポートしないため付与しない。
+    if (AppState.GeminiSearchGroundingEnabled && !isTTS && !isTranscribe) bodyData.tools = [{ type: 'google_search' }];
     // FLEX推論: Interactions APIでも同じservice_tierフィールドで指定できる
     if (AppState.GeminiFlexInferenceEnabled) bodyData.service_tier = 'flex';
     const geminiInteractionTimeout = AppState.GeminiFlexInferenceEnabled ? GEMINI_FLEX_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
@@ -1784,7 +1874,7 @@ const UI = {
   syncAiSelectButton() {
     const btn = document.getElementById('ai-select-btn');
     const cfg = AppState.modelConfig[AppState.CurrentAIModel.service]?.models?.[AppState.CurrentAIModel.slot];
-    const label = cfg?.label || (AppState.CurrentAIModel.slot === 'QuickModel' ? 'クイック' : '日常・深思考');
+    const label = cfg?.label || (AppState.CurrentAIModel.slot === 'QuickModel' ? 'Daily' : 'Work');
     btn.textContent = `${AppState.CurrentAIModel.service} / ${label}`;
   },
   renderAiSelectList() {
@@ -1852,7 +1942,7 @@ const UI = {
     AppState.attachedFiles.forEach((file, idx) => {
       const chip = document.createElement('div');
       chip.className = 'file-chip';
-      chip.innerHTML = `${file.isImage ? '🖼' : '📄'} ${escapeHtml(file.name)} <span onclick="UI.removeAttachment(${idx})">×</span>`;
+      chip.innerHTML = `${file.isImage ? '🖼' : (file.isAudio ? '🎵' : '📄')} ${escapeHtml(file.name)} <span onclick="UI.removeAttachment(${idx})">×</span>`;
       bar.appendChild(chip);
     });
   },
@@ -2022,6 +2112,12 @@ const UI = {
     if (interactionIdToggle) interactionIdToggle.checked = !!AppState.GeminiInteractionIdEnabled;
     const flexToggle = document.getElementById('gemini-flex-inference-toggle');
     if (flexToggle) flexToggle.checked = !!AppState.GeminiFlexInferenceEnabled;
+    const ttsVoiceInput = document.getElementById('gemini-tts-voice-input');
+    if (ttsVoiceInput) ttsVoiceInput.value = AppState.GeminiTTSVoice || '';
+    const ttsStyleInput = document.getElementById('gemini-tts-style-input');
+    if (ttsStyleInput) ttsStyleInput.value = AppState.GeminiTTSStyle || '';
+    const transcribeSmartToggle = document.getElementById('gemini-transcribe-smart-toggle');
+    if (transcribeSmartToggle) transcribeSmartToggle.checked = !!AppState.GeminiTranscribeSmartMode;
   },
   populateModelsForm() {
     const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
@@ -2267,15 +2363,32 @@ const UI = {
     document.addEventListener('click', (e) => {
       if (!attachList.hidden && !e.target.closest('.attach-select-wrap')) closeAttachList();
     });
+    // 音声ファイルはgemini-3.5-transcribe（文字起こし）/音声理解でそのままbase64送信するため、
+    // 画像と同様にFileReader#readAsDataURLでバイナリのまま読み込む（file.text()で読むと
+    // バイナリが破損しGeminiに音声として認識されない）。
+    const readFileAsDataURL = (file) => new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
     const handleAttachedFile = async (file) => {
       if (!file) return;
       const isImage = file.type.startsWith('image/');
+      const isAudio = file.type.startsWith('audio/');
       if (isImage) {
         const compressed = await compressImage(file, 1024, 0.8);
-        AppState.attachedFiles.push({ name:file.name, mimeType:file.type || 'image/jpeg', isImage:true, data:compressed });
+        AppState.attachedFiles.push({ name:file.name, mimeType:file.type || 'image/jpeg', isImage:true, isAudio:false, data:compressed });
+      } else if (isAudio) {
+        // 公式サポート形式（wav/mp3/aiff/aac/ogg/flac/mpeg/m4a/l16/opus/alaw/mulaw/webm）以外は
+        // Gemini側で拒否される可能性があるため、送信前に軽く警告する。
+        const supported = /^audio\/(wav|x-wav|mpeg|mp3|aiff|x-aiff|aac|ogg|flac|x-flac|m4a|x-m4a|l16|opus|alaw|mulaw|webm)/i.test(file.type);
+        if (!supported) alert(`「${file.name}」の形式（${file.type || '不明'}）はGemini 3.5 Transcribeの対応形式と異なる可能性があります。送信は試行されますが、失敗する場合はWAV/MP3等に変換してください。`);
+        const dataUrl = await readFileAsDataURL(file);
+        AppState.attachedFiles.push({ name:file.name, mimeType:file.type || 'audio/mpeg', isImage:false, isAudio:true, data:dataUrl });
       } else {
         const textData = await file.text();
-        AppState.attachedFiles.push({ name:file.name, mimeType:file.type || 'text/plain', isImage:false, data:textData });
+        AppState.attachedFiles.push({ name:file.name, mimeType:file.type || 'text/plain', isImage:false, isAudio:false, data:textData });
       }
       this.renderAttachmentChips();
     };
@@ -2287,6 +2400,7 @@ const UI = {
       input.type = 'file';
       if (type === 'image') { input.accept = 'image/*'; }
       else if (type === 'camera') { input.accept = 'image/*'; input.capture = 'environment'; }
+      else if (type === 'audio') { input.accept = 'audio/*'; }
       // type === 'file' の場合は従来通り種類を限定しない
       input.onchange = (e2) => handleAttachedFile((e2.target.files || [])[0]);
       input.click();
@@ -2334,6 +2448,18 @@ const UI = {
       AppState.GeminiFlexInferenceEnabled = flexToggle ? flexToggle.checked : false;
       localStorage.setItem('favhub_gemini_flex_inference_enabled', String(AppState.GeminiFlexInferenceEnabled));
 
+      const ttsVoiceInput = document.getElementById('gemini-tts-voice-input');
+      AppState.GeminiTTSVoice = (ttsVoiceInput && ttsVoiceInput.value.trim()) || 'Kore';
+      localStorage.setItem('favhub_gemini_tts_voice', AppState.GeminiTTSVoice);
+
+      const ttsStyleInput = document.getElementById('gemini-tts-style-input');
+      AppState.GeminiTTSStyle = ttsStyleInput ? ttsStyleInput.value.trim() : '';
+      localStorage.setItem('favhub_gemini_tts_style', AppState.GeminiTTSStyle);
+
+      const transcribeSmartToggle = document.getElementById('gemini-transcribe-smart-toggle');
+      AppState.GeminiTranscribeSmartMode = transcribeSmartToggle ? transcribeSmartToggle.checked : false;
+      localStorage.setItem('favhub_gemini_transcribe_smart', String(AppState.GeminiTranscribeSmartMode));
+
       closeModal('apiperservice-modal');
     };
 
@@ -2344,27 +2470,32 @@ const UI = {
       const claudeKey = document.getElementById('claudecode-key-input').value.trim();
       btn.textContent = '取得中...'; btn.disabled = true;
       try {
+        // 自動取得は「初回設定・最新モデルへの追従」専用。高推論系（o1/o3等）や
+        // 特化型（pro/opus/embedding/tts/image等）モデルは対象外とし、ユーザーの手動指定に委ねる。
+        // Daily = 軽量・低コスト側、Work = 通常（非特化）側 の2段階のみを自動選定する。
         if (chatgptKey) {
           const list = await ProviderService.fetchOpenAIModels(chatgptKey);
-          const valid = list.filter(m => m.startsWith('gpt-') || m.startsWith('o1') || m.startsWith('o3'));
-          const quick = valid.find(m => m.includes('mini') || m.includes('turbo')) || valid[0];
-          const daily = valid.find(m => m.includes('gpt-5') || m.includes('o3') || m.includes('o1')) || valid[0];
-          if (quick) document.getElementById('model-chatgpt-quick').value = quick;
-          if (daily) document.getElementById('model-chatgpt-daily').value = daily;
+          const valid = list.filter(m => m.startsWith('gpt-')); // o1/o3系の推論特化モデルは自動選定の対象外
+          const daily = valid.find(m => m.includes('mini')) || valid[0];
+          const work = valid.find(m => !m.includes('mini')) || valid[0];
+          if (daily) document.getElementById('model-chatgpt-quick').value = daily;
+          if (work) document.getElementById('model-chatgpt-daily').value = work;
         }
         if (geminiKey) {
           const list = await ProviderService.fetchGeminiModels(geminiKey);
-          const quick = list.find(m => m.includes('flash')) || list[0];
-          const daily = list.find(m => m.includes('pro')) || list[0];
-          if (quick) document.getElementById('model-gemini-quick').value = quick;
-          if (daily) document.getElementById('model-gemini-daily').value = daily;
+          // embedding/tts/image等の特化モデル名にも「flash」を含むことがあるため除外してから判定する
+          const valid = list.filter(m => !/embedding|tts|image|vision|aqa/i.test(m));
+          const daily = valid.find(m => m.includes('flash-lite')) || valid.find(m => m.includes('flash')) || valid[0];
+          const work = valid.find(m => m.includes('flash') && !m.includes('flash-lite')) || valid[0];
+          if (daily) document.getElementById('model-gemini-quick').value = daily;
+          if (work) document.getElementById('model-gemini-daily').value = work;
         }
         if (claudeKey) {
           const list = await ProviderService.fetchClaudeModels(claudeKey);
-          const quick = list.find(m => m.includes('haiku')) || list[0];
-          const daily = list.find(m => m.includes('sonnet') || m.includes('opus')) || list[0];
-          if (quick) document.getElementById('model-claudecode-quick').value = quick;
-          if (daily) document.getElementById('model-claudecode-daily').value = daily;
+          const daily = list.find(m => m.includes('haiku')) || list[0];
+          const work = list.find(m => m.includes('sonnet')) || list[0]; // opusは特化枠として自動選定の対象外
+          if (daily) document.getElementById('model-claudecode-quick').value = daily;
+          if (work) document.getElementById('model-claudecode-daily').value = work;
         }
         alert('APIキーで利用可能なモデル一覧を取得し、「使用モデル」の入力欄に補完しました！');
       } catch (e) { alert(`モデル取得エラー: ${e.message}`); }
@@ -2594,7 +2725,7 @@ const UI = {
       // 実データ（media）が1件も無いのに、テキスト側に画像タグらしきものが含まれる場合は、
       // 使用モデルが画像生成に対応しておらず「生成したふり」をしている可能性が高いので明示する。
       if (service === 'Gemini' && !(AppState.CurrentAIOutputMedia || []).length && looksLikeHallucinatedMediaTag(body)) {
-        body += `\n\n⚠️ 現在の「${slot === 'QuickModel' ? 'クイック' : '日常・深思考'}」モデル（${modelDef.name}）は画像/動画等の直接生成に対応していない可能性があります。AIが実際には生成せず、生成したふりのタグ・URLを書いている可能性があります。設定 > 使用モデルで、画像生成対応モデル（例: gemini-3.1-flash-lite-image, gemini-3.1-flash-image, gemini-3-pro-image 等）に変更してください。`;
+        body += `\n\n⚠️ 現在の「${slot === 'QuickModel' ? 'Daily' : 'Work'}」モデル（${modelDef.name}）は画像/動画等の直接生成に対応していない可能性があります。AIが実際には生成せず、生成したふりのタグ・URLを書いている可能性があります。設定 > 使用モデルで、画像生成対応モデル（例: gemini-3.1-flash-lite-image, gemini-3.1-flash-image, gemini-3-pro-image 等）に変更してください。`;
       }
 
       const now = new Date().toISOString();
