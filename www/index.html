@@ -420,8 +420,10 @@ button:disabled { opacity:.38; cursor:not-allowed; }
     <input type="text" id="model-chatgpt-daily" placeholder="例: gpt-5">
     <label>Gemini クイックモデル（QuickModel）</label>
     <input type="text" id="model-gemini-quick" placeholder="例: gemini-3.8-flash">
+    <div style="font-size:10.5px; color:#888; margin-top:4px;">メディア生成時にはチャット設定よりInteraction IDの有効化を推奨します</div>
     <label>Gemini 日常・深思考モデル（DailyModel）</label>
     <input type="text" id="model-gemini-daily" placeholder="例: gemini-3.1-pro">
+    <div style="font-size:10.5px; color:#888; margin-top:4px;">メディア生成時にはチャット設定よりInteraction IDの有効化を推奨します</div>
     <label>ClaudeCode クイックモデル（QuickModel）</label>
     <input type="text" id="model-claudecode-quick" placeholder="例: claude-haiku-4-5">
     <label>ClaudeCode 日常・深思考モデル（DailyModel）</label>
@@ -455,7 +457,7 @@ button:disabled { opacity:.38; cursor:not-allowed; }
 <div id="hcontext-modal" class="modal-overlay">
   <div class="modal-content">
     <h3><span class="drawer-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3l7 3.5-7 3.5-7-3.5L10 3z"/><path d="M3 10l7 3.5 7-3.5M3 13.5l7 3.5 7-3.5"/></svg></span>コンテキスト管理</h3>
-    <p class="sub">AIContext（Deep/Chat/Single）の切替はトップバーのピルボタンで行います。Deepモードで会話するたびにAIが自動で更新するほか、ここで手動編集・保存もできます。</p>
+    <p class="sub">AIContext（Deep/Chat/Single）の切替はトップバーのピルボタンで行います。Deepモードで会話するたびにAIが自動で更新するほか、ここで手動編集・保存もできます。（Gemini Interaction ID有効時は自動的にDirect扱いとなり、この切替は使用できません）</p>
     <label>objective（目的）</label>
     <input type="text" id="hctx-objective" placeholder="例: 旅行プランを一緒に考える">
     <label>scope（範囲）</label>
@@ -531,12 +533,25 @@ button:disabled { opacity:.38; cursor:not-allowed; }
 <!-- バックアップ／復元 -->
 <div id="backup-modal" class="modal-overlay">
   <div class="modal-content">
-    <h3><span class="drawer-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="10" cy="5" rx="6" ry="2.3"/><path d="M4 5v4c0 1.27 2.7 2.3 6 2.3s6-1.03 6-2.3V5"/><path d="M4 9v4c0 1.27 2.7 2.3 6 2.3s6-1.03 6-2.3V9"/></svg></span>データ管理</h3>
+    <h3><span class="drawer-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="10" cy="5" rx="6" ry="2.3"/><path d="M4 5v4c0 1.27 2.7 2.3 6 2.3s6-1.03 6-2.3V5"/><path d="M4 9v4c0 1.27 2.7 2.3 6 2.3s6-1.03 6-2.3V9"/></svg></span>バックアップ／復元</h3>
     <div style="font-size:11px; color:#888; margin-bottom:8px;">対象：モデル名・パーソナリティ設定・セリフ設定（APIキー・コンテキスト管理の内容・現在進行中の会話履歴、履歴(RequestLog)は含みません）</div>
     <button id="export-data-btn" class="menu-item" style="background:#2563eb; text-align:center;">📤 設定をエクスポート（JSON）</button>
     <button id="import-data-btn" class="menu-item" style="text-align:center;">📥 JSONから復元</button>
     <input type="file" id="import-data-file-input" accept="application/json,.json" style="display:none;">
     <button id="backup-modal-close" class="menu-item" style="text-align:center; margin-top:6px;">閉じる</button>
+  </div>
+</div>
+
+<!-- 診断ログ -->
+<div id="diagnostics-modal" class="modal-overlay">
+  <div class="modal-content">
+    <h3><span class="drawer-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="10" cy="5" rx="6" ry="2.3"/><path d="M4 5v4c0 1.27 2.7 2.3 6 2.3s6-1.03 6-2.3V5"/><path d="M4 9v4c0 1.27 2.7 2.3 6 2.3s6-1.03 6-2.3V9"/></svg></span>診断ログ</h3>
+    <div style="font-size:11px; color:#888; margin-bottom:8px;">診断ログ：API応答・画像表示・完了判定・エラーの時系列を保存します。</div>
+    <button id="show-diagnostics-btn" class="menu-item" style="text-align:center;">🔎 診断ログを表示</button>
+    <button id="export-diagnostics-btn" class="menu-item" style="text-align:center;">📤 診断ログをJSON保存</button>
+    <button id="clear-diagnostics-btn" class="menu-item" style="text-align:center;">🗑 診断ログを削除</button>
+    <pre id="diagnostics-view" style="display:none; max-height:260px; overflow:auto; white-space:pre-wrap; word-break:break-word; background:rgba(0,0,0,.28); border:1px solid rgba(255,255,255,.12); border-radius:10px; padding:10px; font-size:9px; line-height:1.5; color:#bbb;"></pre>
+    <button id="diagnostics-modal-close" class="menu-item" style="text-align:center; margin-top:6px;">閉じる</button>
   </div>
 </div>
 
@@ -647,7 +662,8 @@ const DRAWER_CATEGORIES = {
     { label:'AIモデル登録', action:'models', icon:DRAWER_ICONS.models }
   ]},
   dataManagement: { title:'データ管理', icon:DRAWER_ICONS.dataManagement, items:[
-    { label:'バックアップ／復元', action:'backup', icon:DRAWER_ICONS.dataManagement }
+    { label:'バックアップ／復元', action:'backup', icon:DRAWER_ICONS.dataManagement },
+    { label:'診断ログ', action:'diagnostics', icon:DRAWER_ICONS.dataManagement }
   ]}
 };
 
@@ -669,12 +685,17 @@ const DEFAULT_WAITING_TEXTS = [
 const DEFAULT_HIERARCHICAL_CONTEXT = { global_scope: { objective:'', scope:'', constraints:[] }, detailed_specs:{} };
 
 // AIContext: 仕様書のContextModeに合わせて Deep/Flow/Single（大文字始まり）で統一する
+// 'Off'（表示名Direct）は手動サイクルの対象には含めない。Direct=Interaction ID有効化と連動させた結果、
+// ピル自体がロックされてしまい順送りで抜けられなくなるため、ピルでは選択不可のままにする。
+// 'Off'はGemini Interaction ID有効時にsyncContextPill()が強制表示する専用状態として残す。
 const CONTEXT_MODES = ['Deep', 'Flow', 'Single'];
-// 表示名のみ Flow→Chat に変更（内部識別子は互換のため'Flow'のまま）
+// 表示名のみ Flow→Chat に変更（内部識別子は互換のため'Flow'のまま）。Offは手動選択不可だが
+// syncContextPill()の強制表示で参照するためMODE_METAには残す。
 const MODE_META = {
   Deep:   { emoji:'🟣', label:'Deep' },
   Flow:   { emoji:'🔵', label:'Chat' },
-  Single: { emoji:'🟢', label:'Single' }
+  Single: { emoji:'🟢', label:'Single' },
+  Off:    { emoji:'⚪', label:'Direct' }
 };
 
 const IMMERSIVE_DEFAULT_ENABLED = true;
@@ -820,13 +841,14 @@ async function setSecure(key, value) {
 
 /* ---------------- RequestLog 履歴（仕様書 storage.js 準拠・IndexedDB） ---------------- */
 const DB_NAME = 'favhub-db';
-const DB_VERSION = 1;
+const DB_VERSION = 3;
 function openRequestDb() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains('requests')) db.createObjectStore('requests', { keyPath:'id' });
+      if (!db.objectStoreNames.contains('diagnostics')) db.createObjectStore('diagnostics', { keyPath:'requestId' });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -873,8 +895,21 @@ async function LoadRequestLog(id) { try { return await requestTx('readonly', sto
 async function DeleteRequestLog(id) { try { await requestTx('readwrite', store => store.delete(id)); } catch {} }
 // 直近の生成物（画像/音声/動画/ファイル）を保存日時つきで永続化する（72時間の保持期限判定に使う）
 function saveLastResponseMedia(media) {
-  localStorage.setItem('favhub_last_response_media', JSON.stringify(media || []));
-  localStorage.setItem('favhub_last_response_media_at', String(Date.now()));
+  // 生成画像のBase64本体をlocalStorageへ保存すると容量超過しやすいため、
+  // localStorageには小さなメタデータだけを残す。画像本体はIndexedDBのRequestLog側を正本とする。
+  const metadata = (Array.isArray(media) ? media : []).map(item => ({
+    kind: item?.kind || 'file',
+    mimeType: item?.mimeType || '',
+    uri: item?.uri || null
+  }));
+  try {
+    localStorage.setItem('favhub_last_response_media', JSON.stringify(metadata));
+    localStorage.setItem('favhub_last_response_media_at', String(Date.now()));
+    return true;
+  } catch (e) {
+    console.warn('直近生成物のlocalStorage保存をスキップしました（画像本体はIndexedDBへ保存）。', e);
+    return false;
+  }
 }
 function clearLastResponseMedia() {
   localStorage.removeItem('favhub_last_response_media');
@@ -996,10 +1031,93 @@ const AppState = {
   isRecording: false,
   recognition: null,
   abortController: null,
-  immersiveTimer: null
+  immersiveTimer: null,
+  requestDiagnostics: null,
+  lastRequestResult: null
 };
 
-function saveConversationHistory() { localStorage.setItem('favhub_conversation_history', JSON.stringify(AppState.conversationHistory)); }
+
+
+// ページ再読み込み後も、最後のassistant応答が存在する場合はAPIを再実行せず再表示できるようにする。
+(() => {
+  const turns=AppState.conversationHistory || [];
+  const lastAssistant=[...turns].reverse().find(h => h.role==='assistant');
+  if (lastAssistant) AppState.lastRequestResult={status:'success',body:lastAssistant.content || AppState.lastResponse || '',media:Array.isArray(lastAssistant.media)?lastAssistant.media:[]};
+})();
+
+function createRequestDiagnostic({ service, model, mode, interactionIdEnabled, flexEnabled, prompt }) {
+  const requestId = GenerateId('req');
+  const log = { requestId, timestamp:GetCurrentTimestamp(), service, provider:service, model, mode,
+    interactionIdEnabled:!!interactionIdEnabled, flexEnabled:!!flexEnabled,
+    prompt:String(prompt || '').slice(0,2000), status:'processing', phase:null,
+    startedAt:performance.now(), responseAt:null, mediaDetectedAt:null, renderStartedAt:null,
+    mediaRenderedAt:null, completedAt:null, sendEnabledAt:null, textReceived:false,
+    mediaReceived:false, mediaCount:0, mediaRendered:false, restoreCount:0, error:null };
+  AppState.requestDiagnostics = log; persistRequestDiagnostic(log); return log;
+}
+function markRequestDiagnostic(log, phase, patch={}) {
+  if (!log) return; const now=performance.now();
+  if (phase==='response_received') log.responseAt=now;
+  if (phase==='media_detected') log.mediaDetectedAt=now;
+  if (phase==='render_start') log.renderStartedAt=now;
+  if (phase==='media_rendered') log.mediaRenderedAt=now;
+  if (phase==='completed') log.completedAt=now;
+  if (phase==='send_enabled') log.sendEnabledAt=now;
+  Object.assign(log, patch, {lastPhase:phase}); persistRequestDiagnostic(log);
+}
+function failRequestDiagnostic(log, phase, error) {
+  if (!log) return;
+  log.status=(phase==='render'||phase==='image-load')?'render-error':(error?.name==='TimeoutError'?'timeout':'api-error');
+  log.phase=phase; log.error={name:error?.name||'Error',status:error?.status??null,message:String(error?.message||error||'Unknown error').slice(0,2000),timestamp:GetCurrentTimestamp()};
+  persistRequestDiagnostic(log);
+}
+async function persistRequestDiagnostic(log) { try { await requestTx('readwrite', store=>store.put({...log})); } catch(e) { console.warn('診断ログの保存に失敗しました。',e); } }
+async function loadRecentRequestDiagnostics(limit=30) {
+  try { const db=await openRequestDb(); return await new Promise((resolve,reject)=>{ const req=db.transaction('diagnostics','readonly').objectStore('diagnostics').getAll(); req.onsuccess=()=>resolve((req.result||[]).sort((a,b)=>String(b.timestamp).localeCompare(String(a.timestamp))).slice(0,limit)); req.onerror=()=>reject(req.error); }); } catch { return []; }
+}
+async function clearRequestDiagnostics() {
+  try { await requestTx('readwrite', store => store.clear()); return true; } catch (e) { console.warn('診断ログの削除に失敗しました。', e); return false; }
+}
+function downloadJsonFile(filename, value) {
+  const blob=new Blob([JSON.stringify(value,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+}
+
+function buildConversationHistoryForLocalStorage(history = AppState.conversationHistory) {
+  // localStorageには巨大な生成画像(Base64 dataUrl)を保存しない。
+  // 画像本体はRequestLog/IndexedDB側に保存し、localStorageは会話テキストの復元用に限定する。
+  const source = Array.isArray(history) ? history : [];
+  return source.map(h => {
+    const copy = { ...h };
+    delete copy.media;
+    // 異常に長いテキストが履歴を圧迫しないよう、1発言あたりの保存上限を設ける。
+    if (typeof copy.content === 'string' && copy.content.length > 20000) {
+      copy.content = copy.content.slice(0, 20000) + '\n…（保存上限により省略）';
+    }
+    return copy;
+  });
+}
+function saveConversationHistory() {
+  const compact = buildConversationHistoryForLocalStorage();
+  const json = JSON.stringify(compact);
+  try {
+    localStorage.setItem('favhub_conversation_history', json);
+    return true;
+  } catch (e) {
+    if (e?.name !== 'QuotaExceededError') { console.warn('会話履歴の保存に失敗しました。', e); return false; }
+    // 既存の古い履歴が巨大になっている場合は、直近のテキスト履歴だけを残して再試行する。
+    try {
+      const reduced = compact.slice(-40);
+      localStorage.setItem('favhub_conversation_history', JSON.stringify(reduced));
+      console.warn('会話履歴がlocalStorage容量を超えたため、画像データを除外し直近40発言に整理して保存しました。');
+      return true;
+    } catch (e2) {
+      // それでも保存できない場合、今回のAPI応答を「Geminiエラー」と誤判定させない。
+      console.warn('会話履歴の保存容量を超えています。API応答自体は保持します。', e2);
+      return false;
+    }
+  }
+}
 function saveCurrentChatId() { localStorage.setItem('favhub_current_chat_id', AppState.CurrentChatId); }
 function saveIllustrations() { localStorage.setItem('favhub_illustrations_v2', JSON.stringify(AppState.illustrations)); }
 function saveInitialTexts() { localStorage.setItem('favhub_initial_texts_v2', JSON.stringify(AppState.initialTexts)); }
@@ -1182,12 +1300,12 @@ async function providerError(response, provider) {
 function buildAttachmentText(attachments = []) {
   return attachments.filter(a => !a.isImage).map(a => `\n\n【添付ファイル: ${a.name}】\n${a.data}`).join('');
 }
-// 画像出力対応モデル（Nano Banana系: gemini-*-flash-image 等）かどうかの簡易判定。
-// generateContentで画像を返させるには generationConfig.responseModalities に "IMAGE" を含めることが
-// 必須（Google公式ドキュメント記載の必須設定）。これを付けないと、モデルが画像出力可能であるにも関わらず、
-// 「IMAGE_GENERATION」のようなプレースホルダ的なテキストを返したり、生成が不安定になったりする。
-function geminiModelSupportsImageOutput(model = '') {
-  return /image|nano-?banana/i.test(model);
+// Interaction APIで動画出力を明示する必要があるリクエストかを、モデル名ではなく
+// ユーザーの生成指示から判定する。通常のテキスト会話には影響しない。
+function looksLikeVideoGenerationRequest(prompt = '') {
+  const text = String(prompt).trim();
+  if (!text) return false;
+  return /(?:動画|ムービー|映像|ビデオ)\s*(?:を|の)?\s*(?:生成|作成|作って|制作)|(?:generate|create|make|produce)\s+(?:a\s+)?(?:video|movie|clip)|text[- ]to[- ]video/i.test(text);
 }
 
 const ProviderService = {
@@ -1233,8 +1351,15 @@ const ProviderService = {
     // 実際の画像データを返さず「IMAGE_GENERATION」のようなテキストだけを返すことがある
     // （Google公式ドキュメントが必須としている設定）。画像出力に対応しないモデルに指定すると
     // 逆にエラーになるため、モデル名から画像対応と判定できた場合のみ付与する。
-    if (geminiModelSupportsImageOutput(model)) {
-      bodyData.generationConfig = { ...(bodyData.generationConfig || {}), responseModalities: ['TEXT', 'IMAGE'] };
+    if (/image|nano-?banana/i.test(model)) {
+      // Googleの画像生成仕様に合わせ、TEXT+IMAGEを明示する。
+      // Nano Banana 2 Liteは1Kがデフォルトなので、imageSizeは指定しない。
+      // responseFormat.image.imageSize をここで指定すると、generateContent側で
+      // ImageResponseFormat の enum として解釈され、Invalid value エラーになるため。
+      bodyData.generationConfig = {
+        ...(bodyData.generationConfig || {}),
+        responseModalities: ['TEXT', 'IMAGE']
+      };
     }
     // FLEX推論: 有効時のみservice_tierを付与する（コスト5割減の代わりに待ち時間が伸び、
     // 混雑時は503/429で弾かれうるため、タイムアウトも専用の長めの値に切り替える）
@@ -1272,13 +1397,28 @@ const ProviderService = {
     });
     inputParts.push({ type:'text', text: fullPrompt });
     const bodyData = { model, input: inputParts, store: true };
-    if (systemPrompt) bodyData.system_instruction = systemPrompt;
+    // Interaction ID経由のリクエストでは、モデルの種類を問わずカスタム指示（system_instruction）を送らない。
+    // Gemini Omni Flash（動画生成）だけでなく、画像/音声生成モデルでもInteraction ID利用時は
+    // 未対応パラメータによる不安定化を避けるため、この経路では一律に付与しない。
+    // （systemPromptそのものは呼び出し元の互換のため引数として残すが、ここでは使用しない）
     if (previousInteractionId) bodyData.previous_interaction_id = previousInteractionId;
+    // Interactions APIではメディア出力を response_format で明示する。
+    // 画像は既存の画像対応モデル向け設定を維持する。
+    // 動画はモデル名で自動ルーティングせず、ユーザーが動画生成を明示した場合だけ要求する。
+    if (/image|nano-?banana/i.test(model)) {
+      // 公式仕様のresponse_formatは画像生成の場合も単一オブジェクト（{type:'image', ...}）で、
+      // {type:'text'}と{type:'image'}を並べた配列という形はドキュメントのどの例にも存在しない。
+      // 不正な形状を送るとresponse_formatごと無視される/エラーになる恐れがあるため、
+      // 動画（{type:'video'}）と同じ単一オブジェクト形式に統一する。
+      bodyData.response_format = { type: 'image' };
+    } else if (looksLikeVideoGenerationRequest(prompt)) {
+      // delivery: 'inline' は公式仕様に存在しない値（有効な明示値は 'uri' のみで、
+      // 省略時のデフォルトがinline base64）。不正な値を送るとresponse_formatごと
+      // 無視され、動画を要求したのにテキストのみが返る不具合の原因になっていたため削除。
+      bodyData.response_format = { type: 'video' };
+    }
     // Google Search Grounding: 有効時のみ google_search ツールを付与する（Interactions APIのTool仕様）
     if (AppState.GeminiSearchGroundingEnabled) bodyData.tools = [{ type: 'google_search' }];
-    // 注: Interactions API（v1beta/interactions）はベータ版でresponseModalities相当の公式仕様が
-    // 確認できなかったため、ここでは付与しない。画像生成を安定させたい場合は、
-    // 「Interaction ID（会話継続）を使用する」をOFFにし、通常のgenerateContent経路を使うことを推奨する。
     // FLEX推論: Interactions APIでも同じservice_tierフィールドで指定できる
     if (AppState.GeminiFlexInferenceEnabled) bodyData.service_tier = 'flex';
     const geminiInteractionTimeout = AppState.GeminiFlexInferenceEnabled ? GEMINI_FLEX_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
@@ -1307,6 +1447,15 @@ const ProviderService = {
     onDelta(text);
     if (media.length && onMedia) onMedia(media);
     if (data.id && onInteractionId) onInteractionId(data.id);
+    return {
+      responseStepTypes: (data.steps || []).map(step => step.type),
+      responseModelOutputContentTypes: modelOutputContents.map(c => c?.type).filter(Boolean),
+      responseHasOutputVideo: modelOutputContents.some(c => c?.type === 'video'),
+      responseHasVideoData: modelOutputContents.some(c => c?.type === 'video' && !!c?.data),
+      responseHasVideoUri: modelOutputContents.some(c => c?.type === 'video' && !!c?.uri),
+      responseStatus: data.status || null,
+      interactionId: data.id || null
+    };
   },
 
   async sendClaudeCode({ endpoint, apiKey, model, systemPrompt, history, prompt, attachments, useThinking, signal, onDelta }) {
@@ -1564,7 +1713,7 @@ async function CompleteIllustrationTransition() {
    ポップインで表示する。アイドル時（Ready/Completed中）に入室した場合は退室手段が
    必要なため即時表示する。 */
 function updateImmersiveCompleteVisibility() {
-  const shouldShow = AppState.RequestState !== 'Processing';
+  const shouldShow = ['Completed','Failed','Interrupted','Ready'].includes(AppState.RequestState);
   if (shouldShow) {
     const wasHidden = immersiveCompleteBtn.hidden;
     immersiveCompleteBtn.hidden = false;
@@ -1605,6 +1754,25 @@ function ExitImmersiveView() {
 }
 
 /* ---------------- UI ---------------- */
+async function waitForMediaElementReady(el) {
+  if (!el) return;
+  if (el.tagName==='IMG') {
+    if (el.complete && el.naturalWidth>0) { if (typeof el.decode==='function') await el.decode().catch(()=>{}); return; }
+    await new Promise(resolve=>{ let done=false; const finish=()=>{if(done)return;done=true;cleanup();resolve();}; const cleanup=()=>{el.removeEventListener('load',finish);el.removeEventListener('error',finish);}; el.addEventListener('load',finish,{once:true});el.addEventListener('error',finish,{once:true}); });
+    if (typeof el.decode==='function') await el.decode().catch(()=>{});
+  } else if (el.tagName==='VIDEO' && el.readyState<1) {
+    await new Promise(resolve=>{ const finish=()=>resolve(); el.addEventListener('loadedmetadata',finish,{once:true}); el.addEventListener('error',finish,{once:true}); });
+  }
+}
+function syncRequestControls() {
+  const sendBtn=document.getElementById('send-btn'), stopBtn=document.getElementById('stop-btn'), regenerateBtn=document.getElementById('regenerate-btn');
+  const busy=['Processing','ResponseReceived','Rendering'].includes(AppState.RequestState);
+  if(sendBtn) sendBtn.disabled=busy;
+  if(stopBtn){stopBtn.hidden=!busy;stopBtn.disabled=!busy;}
+  if(regenerateBtn){regenerateBtn.disabled=busy || !AppState.lastRequestResult;regenerateBtn.classList.toggle('spinning',busy);}
+  if(!busy && AppState.requestDiagnostics?.completedAt) markRequestDiagnostic(AppState.requestDiagnostics,'send_enabled');
+}
+
 const UI = {
   // AIモデル切替：以前はポップアップ（別メニュー）に飛んでいたが、動線が途切れるため
   // トップバー内で完結するプルダウンに変更した。ネイティブ<select>はOSのピッカーが
@@ -1640,15 +1808,17 @@ const UI = {
   syncContextPill() {
     const btn = document.getElementById('context-btn');
     if (isAIContextDisabledByInteractionId()) {
-      btn.dataset.mode = 'Single';
-      btn.textContent = '⚪ OFF';
-      btn.title = 'Gemini Interaction ID有効化中はAIコンテキストを使用しません（API別設定で切替）';
+      btn.dataset.mode = 'Off';
+      btn.textContent = `${MODE_META.Off.emoji} ${MODE_META.Off.label}`;
+      btn.title = 'Gemini Interaction ID有効化中はAIコンテキストを使用しません（設定＞API別設定で切替）';
       btn.style.opacity = '0.5';
       btn.style.pointerEvents = 'none';
       return;
     }
     btn.style.opacity = '';
     btn.style.pointerEvents = '';
+    // 'Off'はピルでは選択不可のため、何らかの経緯で紛れ込んでいた場合はDeepに正規化する
+    if (AppState.AIContext === 'Off') { AppState.AIContext = 'Deep'; saveAIContext(); }
     const meta = MODE_META[AppState.AIContext] || MODE_META.Deep;
     btn.dataset.mode = AppState.AIContext;
     btn.textContent = `${meta.emoji} ${meta.label}`;
@@ -1697,47 +1867,22 @@ const UI = {
   // （このターンだけでなく過去のターン分も含む）。小さなサムネイル+DLボタンのグリッドで表示し、
   // テキスト（.ai-output-text）の可読性を妨げないようにする。タップで拡大表示（ライトボックス）。
   // opts.silent=true（履歴復元時など）では、生成完了の「キック」演出を出さない。
-  renderResponseMedia(media = [], opts = {}) {
-    const box = document.getElementById('response-media');
-    box.innerHTML = '';
-    if (!media || !media.length) { box.hidden = true; return; }
-    const grid = document.createElement('div');
-    grid.className = 'response-media-grid';
-    media.forEach((item, idx) => {
-      if (!item?.dataUrl) return;
-      const wrap = document.createElement('div');
-      wrap.className = 'response-media-item';
-
-      const thumb = document.createElement('button');
-      thumb.type = 'button';
-      thumb.className = 'response-media-thumb';
-      thumb.setAttribute('aria-label', '生成物を拡大表示');
-      if (item.kind === 'image') { const img = document.createElement('img'); img.src = item.dataUrl; img.alt = '生成された画像'; thumb.appendChild(img); }
-      else if (item.kind === 'video') { const vid = document.createElement('video'); vid.src = item.dataUrl; vid.muted = true; thumb.appendChild(vid); }
-      else if (item.kind === 'audio') { thumb.textContent = '🎵'; }
-      else { thumb.textContent = '📄'; }
-      thumb.onclick = () => openMediaLightbox(item, idx);
-      wrap.appendChild(thumb);
-
-      const dlBtn = document.createElement('button');
-      dlBtn.type = 'button';
-      dlBtn.className = 'response-media-dl';
-      dlBtn.setAttribute('aria-label', 'ダウンロード');
-      dlBtn.textContent = '⬇';
-      dlBtn.onclick = (e) => { e.stopPropagation(); downloadMediaItem(item, idx); };
-      wrap.appendChild(dlBtn);
-
-      grid.appendChild(wrap);
+  async renderResponseMedia(media = [], opts = {}) {
+    const box=document.getElementById('response-media'); box.innerHTML='';
+    if(!media || !media.length){box.hidden=true;return;}
+    const grid=document.createElement('div'); grid.className='response-media-grid'; const ready=[];
+    media.forEach((item,idx)=>{
+      if(!item?.dataUrl)return; const wrap=document.createElement('div'); wrap.className='response-media-item';
+      const thumb=document.createElement('button'); thumb.type='button'; thumb.className='response-media-thumb'; thumb.setAttribute('aria-label','生成物を拡大表示');
+      if(item.kind==='image'){const img=document.createElement('img');img.src=item.dataUrl;img.alt='生成された画像';ready.push(waitForMediaElementReady(img));thumb.appendChild(img);}
+      else if(item.kind==='video'){const vid=document.createElement('video');vid.src=item.dataUrl;vid.muted=true;ready.push(waitForMediaElementReady(vid));thumb.appendChild(vid);}
+      else if(item.kind==='audio')thumb.textContent='🎵'; else thumb.textContent='📄';
+      thumb.onclick=()=>openMediaLightbox(item,idx); wrap.appendChild(thumb);
+      const dlBtn=document.createElement('button');dlBtn.type='button';dlBtn.className='response-media-dl';dlBtn.setAttribute('aria-label','ダウンロード');dlBtn.textContent='⬇';dlBtn.onclick=(e)=>{e.stopPropagation();downloadMediaItem(item,idx);};wrap.appendChild(dlBtn);grid.appendChild(wrap);
     });
-    box.appendChild(grid);
-    box.hidden = false;
-    if (!opts.silent) {
-      // 生成完了を視覚的に知らせる「キック」演出（テキストと違い非ストリーミングで一括到着するため、
-      // 何も起きていないように見えてしまうのを防ぐ目的）。
-      box.classList.remove('media-just-generated');
-      void box.offsetWidth; // reflowでアニメーションを再始動
-      box.classList.add('media-just-generated');
-    }
+    box.appendChild(grid); box.hidden=false; if(ready.length) await Promise.all(ready);
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+    if(!opts.silent){box.classList.remove('media-just-generated');void box.offsetWidth;box.classList.add('media-just-generated');}
   },
 
   showOutputPanel() { document.getElementById('output-panel').hidden = false; },
@@ -1982,6 +2127,7 @@ const UI = {
       if (a === 'immersive-settings') { this.populateImmersiveForm(); openModal('immersive-modal'); }
       if (a === 'texts') { this.populateTextsForm(); openModal('texts-modal'); }
       if (a === 'backup') { openModal('backup-modal'); }
+      if (a === 'diagnostics') { openModal('diagnostics-modal'); }
       if (a === 'api') {
         const service = AppState.CurrentAIModel.service;
         const cfg = AppState.modelConfig[service];
@@ -2061,15 +2207,14 @@ const UI = {
     });
 
     /* --- 再読み込み（直前の依頼内容で回答を再生成） --- */
-    document.getElementById('regenerate-btn').addEventListener('click', (e) => {
+    /* --- 再読み込み：成功済みならAPIを呼ばず再表示、エラーなら再送信 --- */
+    document.getElementById('regenerate-btn').addEventListener('click', async (e) => {
       e.stopPropagation();
-      if (AppState.RequestState === 'Processing') return;
-      const text = AppState.CurrentRequestContent;
-      if (!text) return;
+      if (['Processing','ResponseReceived','Rendering'].includes(AppState.RequestState)) return;
       outputPanelEl.classList.remove('expanded');
-      document.getElementById('user-input').value = text;
-      autosize();
-      this.handleSend();
+      if (AppState.lastRequestResult?.status === 'success') { await this.restoreLastResponseView(); return; }
+      const text=AppState.CurrentRequestContent; if(!text)return;
+      document.getElementById('user-input').value=text; autosize(); await this.handleSend();
     });
 
     /* --- 画像ギャラリー（サービスごと） --- */
@@ -2304,6 +2449,7 @@ const UI = {
     };
 
     document.getElementById('backup-modal-close').onclick = () => closeModal('backup-modal');
+    document.getElementById('diagnostics-modal-close').onclick = () => closeModal('diagnostics-modal');
     document.getElementById('export-data-btn').onclick = () => { try { BackupService.downloadExportedData(); } catch (e) { alert(`エクスポートに失敗しました: ${e.message}`); } };
     const importBtn = document.getElementById('import-data-btn');
     const importInput = document.getElementById('import-data-file-input');
@@ -2321,6 +2467,23 @@ const UI = {
       reader.onerror = () => alert('ファイルの読み込みに失敗しました。');
       reader.readAsText(file);
     };
+    document.getElementById('show-diagnostics-btn').onclick = async () => {
+      const view=document.getElementById('diagnostics-view');
+      const logs=await loadRecentRequestDiagnostics(30);
+      view.style.display='block';
+      view.textContent=logs.length ? logs.map(x => JSON.stringify(x,null,2)).join('\n\n==============================\n\n') : '診断ログはありません。';
+    };
+    document.getElementById('export-diagnostics-btn').onclick = async () => {
+      const logs=await loadRecentRequestDiagnostics(200);
+      downloadJsonFile(`favhub_diagnostics_${new Date().toISOString().replace(/[:.]/g,'-')}.json`, logs);
+    };
+    document.getElementById('clear-diagnostics-btn').onclick = async () => {
+      if (!confirm('診断ログをすべて削除しますか？')) return;
+      if (await clearRequestDiagnostics()) {
+        AppState.requestDiagnostics=null;
+        const view=document.getElementById('diagnostics-view'); view.style.display='block'; view.textContent='診断ログはありません。';
+      }
+    };
 
 
     // モーダル外タップで閉じる（全モーダル共通）
@@ -2330,6 +2493,13 @@ const UI = {
   },
 
   /* ---------------- 送信処理（仕様書 ExecuteRequest 準拠・ストリーミング＋Stop対応） ---------------- */
+  async restoreLastResponseView() {
+    const last=AppState.lastRequestResult; if(!last || last.status!=='success')return false;
+    const diagnostic=AppState.requestDiagnostics;
+    try { setRequestState('Rendering');syncRequestControls(); if(diagnostic)markRequestDiagnostic(diagnostic,'render_start'); this.renderResponseText(last.body||''); await this.renderResponseMedia(buildSessionMediaGallery(AppState.conversationHistory)); if(diagnostic){diagnostic.mediaRendered=true;markRequestDiagnostic(diagnostic,'media_rendered');} await CompleteIllustrationTransition(); setRequestState('Completed'); if(diagnostic)markRequestDiagnostic(diagnostic,'completed',{status:'success',restoreCount:(diagnostic.restoreCount||0)+1}); syncRequestControls(); return true; }
+    catch(error){if(diagnostic)failRequestDiagnostic(diagnostic,'render',error);setRequestState('Failed');syncRequestControls();return false;}
+  },
+
   async handleSend() {
     if (AppState.RequestState === 'Processing') return;
     const input = document.getElementById('user-input');
@@ -2342,7 +2512,6 @@ const UI = {
     if (!apiKey) { this.populateApiKeysForm(); openModal('apikeys-modal'); return; }
     AppState.keys[service] = apiKey;
 
-    AppState.firstResponseReceived = true;
     InitialTextManager.stop();
     clearImmersiveTimer(); ExitImmersiveView();
 
@@ -2367,13 +2536,17 @@ const UI = {
     const modelDef = AppState.modelConfig[service].models[slot];
     const cfg = AppState.modelConfig[service];
     const persona = AppState.systemPrompts[service] || '';
-    // Gemini Interaction ID有効化中は、アプリ側のAIContext（履歴送信・階層化コンテキスト）を無効化し、
-    // previous_interaction_idによるサーバー側の会話継続に一本化する（＝常にSingle相当の扱い）。
+    // Gemini Interaction ID有効化中は、アプリ側のAIContext（履歴送信・階層化コンテキスト・カスタム指示）を無効化し、
+    // previous_interaction_idによるサーバー側の会話継続に一本化する（＝常にOff/Direct相当の扱い）。
     const useGeminiInteractionId = service === 'Gemini' && AppState.GeminiInteractionIdEnabled;
-    const mode = useGeminiInteractionId ? 'Single' : (CONTEXT_MODES.includes(AppState.AIContext) ? AppState.AIContext : 'Deep');
-    const recentExchanges = mode === 'Single' ? [] : AppState.conversationHistory.slice(-4);
+    const mode = useGeminiInteractionId ? 'Off' : (CONTEXT_MODES.includes(AppState.AIContext) ? AppState.AIContext : 'Deep');
+    const recentExchanges = (mode === 'Single' || mode === 'Off') ? [] : AppState.conversationHistory.slice(-4);
+    const diagnostic=createRequestDiagnostic({service,model:modelDef.name,mode,interactionIdEnabled:useGeminiInteractionId,flexEnabled:service==='Gemini' && !!AppState.GeminiFlexInferenceEnabled,prompt:text});
+    AppState.lastRequestResult=null;
 
-    let systemPrompt = persona;
+    // Off（Direct）はアプリ側のコンテキスト機能・カスタム指示を一切使わない直結モードのため、
+    // ペルソナ（systemPrompt）自体も送らない。
+    let systemPrompt = mode === 'Off' ? '' : persona;
     if (mode === 'Deep') {
       const currentContextText = hierarchicalContextHasContent(AppState.hierarchicalContext)
         ? `<hierarchical_context>\n${JSON.stringify(AppState.hierarchicalContext)}\n</hierarchical_context>`
@@ -2402,25 +2575,13 @@ const UI = {
         });
         return ProviderService.sendClaudeCode({ ...common, useThinking: slot === 'DailyModel' });
       };
-      // モデル混雑時（503/high demandなど）の一時的な障害は、自動で数回だけ再試行する
-      const MAX_RETRIES = 2;
-      for (let attempt = 0; ; attempt++) {
-        try { await callProvider(); break; }
-        catch (err) {
-          // タイムアウト（一時的な通信の詰まりの可能性がある）も503/5xxと同様に自動リトライ対象に含める
-          const retryable = err?.name !== 'AbortError' && (err?.name === 'TimeoutError' || err?.status === 503 || err?.status >= 500 || /overloaded|high demand|temporarily unavailable/i.test(err?.message || ''));
-          if (!retryable || attempt >= MAX_RETRIES) throw err;
-          output = ''; AppState.CurrentAIOutput = '';
-          AppState.CurrentAIOutputMedia = [];
-          // 表示中の累積ギャラリー（過去ターン分）はリトライ中もそのまま見せておく。
-          const retryReason = err?.name === 'TimeoutError' ? '応答がなかったため' : '混み合っているため';
-          this.setWaitingText(`${retryReason}再試行しています…（${attempt + 1}/${MAX_RETRIES}）`);
-          await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
-        }
-      }
-
-      WaitingTextManager.stop(); this.setWaitingText(''); stopBtn.hidden = true; sendBtn.disabled = false;
-      regenerateBtn.disabled = false; regenerateBtn.classList.remove('spinning');
+      // 画像生成では重複生成を避けるため自動リトライしない。
+      let providerMeta = null;
+      try { providerMeta = await callProvider(); }
+      catch(err){ failRequestDiagnostic(diagnostic,err?.name==='TimeoutError'?'api-timeout':'api',err); throw err; }
+      markRequestDiagnostic(diagnostic,'response_received',{status:'response-received',textReceived:!!String(output||'').trim(),...(providerMeta || {})});
+      WaitingTextManager.stop(); this.setWaitingText(''); stopBtn.hidden=true;
+      setRequestState('ResponseReceived'); syncRequestControls();
 
       let body = (output || '').trim();
       if (mode === 'Deep') {
@@ -2433,28 +2594,39 @@ const UI = {
       // 実データ（media）が1件も無いのに、テキスト側に画像タグらしきものが含まれる場合は、
       // 使用モデルが画像生成に対応しておらず「生成したふり」をしている可能性が高いので明示する。
       if (service === 'Gemini' && !(AppState.CurrentAIOutputMedia || []).length && looksLikeHallucinatedMediaTag(body)) {
-        body += `\n\n⚠️ 現在の「${slot === 'QuickModel' ? 'クイック' : '日常・深思考'}」モデル（${modelDef.name}）は画像/動画等の直接生成に対応していない可能性があります。AIが実際には生成せず、生成したふりのタグ・URLを書いている可能性があります。設定 > 使用モデルで、画像生成対応モデル（例: gemini-2.5-flash-image, gemini-3-pro-image-preview 等）に変更してください。`;
+        body += `\n\n⚠️ 現在の「${slot === 'QuickModel' ? 'クイック' : '日常・深思考'}」モデル（${modelDef.name}）は画像/動画等の直接生成に対応していない可能性があります。AIが実際には生成せず、生成したふりのタグ・URLを書いている可能性があります。設定 > 使用モデルで、画像生成対応モデル（例: gemini-3.1-flash-lite-image, gemini-3.1-flash-image, gemini-3-pro-image 等）に変更してください。`;
       }
 
       const now = new Date().toISOString();
       const responseMedia = AppState.CurrentAIOutputMedia || [];
+      markRequestDiagnostic(diagnostic,'media_detected',{mediaReceived:responseMedia.length>0,mediaCount:responseMedia.length});
+      setRequestState('Rendering'); syncRequestControls(); markRequestDiagnostic(diagnostic,'render_start');
       AppState.conversationHistory.push({ role:'user', content:text, provider:service, timestamp:now });
       AppState.conversationHistory.push({ role:'assistant', content:body, provider:service, timestamp:now, media: responseMedia });
       saveConversationHistory();
       // 生成物の表示は、このターンだけでなく会話全体の累積ギャラリーとして更新する
       // （何度生成しても過去分が消えないようにするため）。
-      this.renderResponseMedia(buildSessionMediaGallery(AppState.conversationHistory));
+      await this.renderResponseMedia(buildSessionMediaGallery(AppState.conversationHistory));
+      if (responseMedia.length) {
+        diagnostic.mediaRendered=true;
+        markRequestDiagnostic(diagnostic,'media_rendered');
+      } else {
+        diagnostic.mediaRendered=false;
+        markRequestDiagnostic(diagnostic,'no_media',{mediaReceived:false,mediaCount:0});
+      }
 
       AppState.lastResponse = body; localStorage.setItem('favhub_last_response', body);
       // 生成物（画像/音声/動画/ファイル）は再送信しなくても復元後に表示され続けるよう永続化する（72時間で自動破棄）
       AppState.lastResponseMedia = responseMedia;
       if (responseMedia.length) saveLastResponseMedia(responseMedia);
       displayRandomIllustration();
-      this.renderResponseText(body);
-
-      setRequestState('Completed');
       await CompleteIllustrationTransition();
+      AppState.firstResponseReceived = true;
+      setRequestState('Completed');
       clearImmersiveTimer();
+      AppState.lastRequestResult={status:'success',body,media:responseMedia};
+      markRequestDiagnostic(diagnostic,'completed',{status:'success'});
+      syncRequestControls();
 
       // 履歴(RequestLog)は新規チャット単位で1件。CurrentChatIdをキーに上書き更新する
       // （タイトルは会話の最初の発言、作成日時も最初の発言時刻で固定し、更新日時だけ進める）
@@ -2471,11 +2643,14 @@ const UI = {
       input.value = ''; AppState.attachedFiles = []; this.renderAttachmentChips(); autosize();
     } catch (error) {
       const mapped = MapProviderError(error);
-      WaitingTextManager.stop(); stopBtn.hidden = true; sendBtn.disabled = false; clearImmersiveTimer();
-      regenerateBtn.disabled = false; regenerateBtn.classList.remove('spinning');
+      WaitingTextManager.stop(); stopBtn.hidden = true; clearImmersiveTimer();
+      appEl.dataset.illustrationState = 'Static';
+      if (mapped.code === 'ABORTED') { diagnostic.status='aborted'; diagnostic.phase='abort'; diagnostic.error={name:error?.name||'AbortError',message:String(mapped.message||'中断').slice(0,2000),timestamp:GetCurrentTimestamp()}; persistRequestDiagnostic(diagnostic); }
+      else if (diagnostic.status !== 'api-error' && diagnostic.status !== 'timeout') failRequestDiagnostic(diagnostic,'api',error);
+      AppState.lastRequestResult={status:mapped.code==='ABORTED'?'aborted':'error',error:mapped};
       appEl.dataset.illustrationState = 'Static';
       if (mapped.code === 'ABORTED') {
-        setRequestState('Interrupted');
+        setRequestState('Interrupted'); syncRequestControls();
         this.renderResponseText(output || '');
         if (output) {
           const now = new Date().toISOString();
@@ -2489,7 +2664,7 @@ const UI = {
           await SaveRequestLog({ RequestId:AppState.CurrentChatId, RequestTitle:(AppState.conversationHistory[0]?.content || text).slice(0,40)||'無題', RequestDate:AppState.conversationHistory[0]?.timestamp || now, RequestUpdatedDate:now, RequestContent:text, AIOutput:output, AIOutputMedia: abortedMedia, service, history: JSON.parse(JSON.stringify(AppState.conversationHistory)) });
         }
       } else {
-        setRequestState('Failed');
+        setRequestState('Failed'); syncRequestControls();
         this.renderResponseText(output ? `${output}\n\n⚠️ 【${service} エラー】\n${mapped.message}` : `⚠️ 【${service} エラー】\n${mapped.message}`);
       }
     } finally { AppState.abortController = null; }
@@ -2520,6 +2695,7 @@ const UI = {
     AppState.attachedFiles = [];
     AppState.CurrentAIOutputMedia = []; this.renderResponseMedia([]);
     AppState.lastResponseMedia = []; clearLastResponseMedia();
+    AppState.lastRequestResult=null; AppState.requestDiagnostics=null;
 
     const input = document.getElementById('user-input');
     input.value = ''; autosize();
