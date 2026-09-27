@@ -102,6 +102,8 @@ button { cursor:pointer; }
    両方を1つのスクロールコンテナの中の通常の縦積みにして解消する。 */
 .ai-output-scroll { flex:1; min-height:0; overflow-y:auto; scrollbar-width:thin; }
 .ai-output-text { padding:12px 15px 18px; white-space:pre-wrap; word-break:break-word; line-height:1.7; font-size:13.5px; text-shadow:0 1px 2px rgba(0,0,0,.18); }
+.chat-link { color:var(--accent-2); text-decoration:underline; text-underline-offset:2px; word-break:break-all; }
+.chat-link:active { opacity:.7; }
 /* 生成物は小さなサムネイルのグリッドで表示し、テキストの可読性を妨げないようにする。
    会話中に何度生成しても、このターン以前の生成物も含めて（チャット単位で）積み上げて表示する。 */
 .response-media { padding:2px 15px 16px; margin:2px 15px 0; border-top:1px dashed rgba(255,255,255,.16); }
@@ -512,6 +514,22 @@ button:disabled { opacity:.38; cursor:not-allowed; }
   </div>
 </div>
 
+<!-- URLリンク設定 -->
+<div id="url-link-modal" class="modal-overlay">
+  <div class="modal-content">
+    <h3><span class="drawer-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 11.5a3 3 0 0 0 4.24 0l2.5-2.5a3 3 0 0 0-4.24-4.24l-1.2 1.2"/><path d="M11.5 8.5a3 3 0 0 0-4.24 0l-2.5 2.5a3 3 0 0 0 4.24 4.24l1.2-1.2"/></svg></span>URLリンク設定</h3>
+    <p class="sub">AIの返信文中に含まれるURLはタップで開けます。オンにすると外部ブラウザ（Capacitor Browser、非対応時はFavHub画面内での遷移）で開き、オフだとFavHub画面内で直接そのページへ遷移します。</p>
+    <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+      <input type="checkbox" id="url-link-external-toggle" style="width:16px; height:16px;">
+      <span style="font-size:12px; color:#ccc;">リンクを外部ブラウザで開く</span>
+    </label>
+    <div class="modal-actions">
+      <button id="url-link-close-btn">キャンセル</button>
+      <button id="url-link-save-btn" class="primary-btn">保存</button>
+    </div>
+  </div>
+</div>
+
 
 <!-- セリフ設定 -->
 <div id="texts-modal" class="modal-overlay">
@@ -657,6 +675,7 @@ const DRAWER_ICONS = {
   hcontext: drawerIconSvg('<path d="M10 3l7 3.5-7 3.5-7-3.5L10 3z"/><path d="M3 10l7 3.5 7-3.5M3 13.5l7 3.5 7-3.5"/>'),
   immersive: drawerIconSvg('<path d="M3 7V3h4M17 7V3h-4M3 13v4h4M17 13v4h-4"/>'),
   texts: drawerIconSvg('<path d="M3 4h14v9H8l-3 3v-3H3V4z"/>'),
+  urlLink: drawerIconSvg('<path d="M8.5 11.5a3 3 0 0 0 4.24 0l2.5-2.5a3 3 0 0 0-4.24-4.24l-1.2 1.2"/><path d="M11.5 8.5a3 3 0 0 0-4.24 0l-2.5 2.5a3 3 0 0 0 4.24 4.24l1.2-1.2"/>'),
   chevronRight: drawerIconSvg('<path d="M7 4l6 6-6 6"/>'),
   chevronLeft: drawerIconSvg('<path d="M13 4l-6 6 6 6"/>')
 };
@@ -670,7 +689,8 @@ const DRAWER_CATEGORIES = {
   chatSettings: { title:'チャット設定', icon:DRAWER_ICONS.chatSettings, items:[
     { label:'イマーシブビュー', action:'immersive-settings', icon:DRAWER_ICONS.immersive },
     { label:'コンテキスト管理', action:'hcontext', icon:DRAWER_ICONS.hcontext },
-    { label:'API別設定', action:'api-per-service', icon:DRAWER_ICONS.apiPerService }
+    { label:'API別設定', action:'api-per-service', icon:DRAWER_ICONS.apiPerService },
+    { label:'URLリンク設定', action:'url-link-settings', icon:DRAWER_ICONS.urlLink }
   ]},
   apiConnection: { title:'API接続', icon:DRAWER_ICONS.apiConnection, items:[
     { label:'APIキー', action:'apikeys', icon:DRAWER_ICONS.apikeys },
@@ -725,6 +745,47 @@ function safeJSONParse(key = '', fallback = null) {
 }
 function escapeHtml(value = '') {
   return String(value).replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
+}
+// AI応答テキスト中のURL（http/https）をタップ可能な<a>に変換する。
+// escapeHtml済みの文字列に対して行うため、抽出したURL文字列はそのままhref/data-urlに使ってよい
+// （&は&amp;のままだがブラウザが属性値内のエンティティを正しく解釈するため問題ない）。
+// 日本語の文章ではURLの直後にスペース無しで句読点・閉じ括弧が続くことが多いため、
+// \sだけを区切りにすると和文まで丸ごとURLとして飲み込んでしまう。
+// URLとして現実的に使われるASCII文字のみを対象にすることで、和文（全角文字）で自然に区切る。
+const CHAT_LINK_URL_RE = /(https?:\/\/[a-zA-Z0-9\-._~:/?#[\]@!$&'()*+,;=%]+)/gi;
+// 文末に残った「.」「,」「)」等は、URL本体ではなく地の文の句読点・閉じ括弧である可能性が高いため、
+// 対応する開き括弧が無ければURLの外側へ戻す。
+function stripTrailingPunctuation(url = '') {
+  const pairs = { ')':'(', ']':'[', '}':'{' };
+  let trail = '';
+  while (url.length) {
+    const last = url[url.length - 1];
+    if (pairs[last]) {
+      const open = pairs[last];
+      const openCount = url.split(open).length - 1;
+      const closeCount = url.split(last).length - 1;
+      if (closeCount > openCount) { trail = last + trail; url = url.slice(0, -1); continue; }
+      break;
+    }
+    if ('.,;:!?'.includes(last)) { trail = last + trail; url = url.slice(0, -1); continue; }
+    break;
+  }
+  return { url, trail };
+}
+function linkifyResponseText(text = '') {
+  return escapeHtml(text).replace(CHAT_LINK_URL_RE, (match) => {
+    const { url, trail } = stripTrailingPunctuation(match);
+    if (!url) return match;
+    return `<a href="${url}" class="chat-link" data-url="${url}" rel="noopener noreferrer">${url}</a>${trail}`;
+  });
+}
+// チャット内リンクのタップ時の遷移先を決める。
+// URLリンク設定がONなら外部ブラウザ（Capacitor Browser優先）、OFFならFavHub画面内でそのページへ遷移する。
+function openChatLinkUrl(url) {
+  if (!url) return;
+  if (AppState.UrlLinkExternalEnabled) { openUrlExternally(url); return; }
+  try { window.location.href = url; }
+  catch (e) { console.warn('In-app link navigation failed:', e); }
 }
 function formatDate(iso) {
   try { return new Intl.DateTimeFormat('ja-JP', { dateStyle:'medium', timeStyle:'short' }).format(new Date(iso)); }
@@ -1002,6 +1063,10 @@ const AppState = {
     const saved = localStorage.getItem('favhub_immersive_motion_enabled');
     return saved === null ? true : saved === 'true';
   })(),
+
+  // チャット本文中のURLリンクをタップした際、外部ブラウザ（Capacitor Browser）で開くか
+  // （デフォルトOFF＝FavHub画面内でそのページへ遷移）
+  UrlLinkExternalEnabled: localStorage.getItem('favhub_url_link_external_enabled') === 'true',
 
   // Gemini送信時にGoogle Search Groundingを有効化するか（デフォルトOFF。課金対象になりうるため明示オプトイン）
   GeminiSearchGroundingEnabled: localStorage.getItem('favhub_gemini_search_grounding') === 'true',
@@ -1949,7 +2014,7 @@ const UI = {
   removeAttachment(idx = 0) { AppState.attachedFiles.splice(idx, 1); this.renderAttachmentChips(); },
 
   renderResponseText(text = '') {
-    document.getElementById('response-box').textContent = text;
+    document.getElementById('response-box').innerHTML = linkifyResponseText(text);
   },
 
   // Gemini等がテキスト以外（画像/音声/動画/ドキュメント）を返した場合の表示。
@@ -2078,7 +2143,7 @@ const UI = {
     AppState.lastResponse = req.AIOutput || '';
     localStorage.setItem('favhub_last_response', AppState.lastResponse);
     document.getElementById('output-panel').classList.add('expanded');
-    document.getElementById('response-box').textContent = lines;
+    document.getElementById('response-box').innerHTML = linkifyResponseText(lines);
     setRequestState('Ready');
     closeModal('history-modal');
   },
@@ -2142,6 +2207,10 @@ const UI = {
     if (motionToggle) { motionToggle.checked = !!AppState.ImmersiveMotionEnabled; motionToggle.disabled = osReduceMotion; }
     document.getElementById('immersive-motion-os-note').hidden = !osReduceMotion;
     document.getElementById('immersive-delay-input').value = String(Math.round(AppState.ImmersiveViewDelay / 1000));
+  },
+  populateUrlLinkForm() {
+    const toggle = document.getElementById('url-link-external-toggle');
+    if (toggle) toggle.checked = !!AppState.UrlLinkExternalEnabled;
   },
   populateTextsForm() {
     SERVICES.forEach(service => {
@@ -2221,6 +2290,7 @@ const UI = {
       if (a === 'persona') { this.populatePersonaForm(); openModal('persona-modal'); }
       if (a === 'hcontext') { this.renderHierarchicalContextForm(); openModal('hcontext-modal'); }
       if (a === 'immersive-settings') { this.populateImmersiveForm(); openModal('immersive-modal'); }
+      if (a === 'url-link-settings') { this.populateUrlLinkForm(); openModal('url-link-modal'); }
       if (a === 'texts') { this.populateTextsForm(); openModal('texts-modal'); }
       if (a === 'backup') { openModal('backup-modal'); }
       if (a === 'diagnostics') { openModal('diagnostics-modal'); }
@@ -2289,6 +2359,9 @@ const UI = {
     /* --- 出力パネル：枠内タップで全文表示/折りたたみ（ImmersiveViewのタップ開閉と一貫させる） --- */
     const outputPanelEl = document.getElementById('output-panel');
     outputPanelEl.addEventListener('click', (e) => {
+      // 本文中のURLリンクはタップで開く（パネルの展開/折りたたみトグルより優先）
+      const linkEl = e.target.closest('.chat-link');
+      if (linkEl) { e.preventDefault(); e.stopPropagation(); openChatLinkUrl(linkEl.dataset.url || linkEl.href); return; }
       if (e.target.closest('#regenerate-btn')) return; // 再読み込みボタンは別処理
       const isExpanding = !outputPanelEl.classList.contains('expanded');
       outputPanelEl.classList.toggle('expanded');
@@ -2296,7 +2369,7 @@ const UI = {
         const lines = (AppState.conversationHistory && AppState.conversationHistory.length)
           ? AppState.conversationHistory.map(h => `${h.role === 'user' ? '🧑 あなた' : `🤖 ${h.provider || 'AI'}`}\n${h.content}`).join('\n\n----------\n\n')
           : (AppState.lastResponse || 'まだやり取りがありません。');
-            document.getElementById('response-box').textContent = lines;
+            document.getElementById('response-box').innerHTML = linkifyResponseText(lines);
       } else {
         this.renderResponseText(AppState.lastResponse);
       }
@@ -2555,6 +2628,14 @@ const UI = {
       AppState.ImmersiveViewDelay = Math.max(0, delaySec) * 1000;
       localStorage.setItem('favhub_immersive_delay', String(AppState.ImmersiveViewDelay));
       closeModal('immersive-modal');
+    };
+
+    document.getElementById('url-link-close-btn').onclick = () => closeModal('url-link-modal');
+    document.getElementById('url-link-save-btn').onclick = () => {
+      const toggle = document.getElementById('url-link-external-toggle');
+      AppState.UrlLinkExternalEnabled = toggle ? toggle.checked : false;
+      localStorage.setItem('favhub_url_link_external_enabled', String(AppState.UrlLinkExternalEnabled));
+      closeModal('url-link-modal');
     };
 
     document.getElementById('texts-close-btn').onclick = () => closeModal('texts-modal');
@@ -2853,7 +2934,7 @@ function openApiConsoleBrowser(url, service = '') {
   title.textContent = `${serviceLabel} APIコンソール`;
   message.textContent = `${serviceLabel} のAPIキーを確認・発行するページを開きます。ログイン後にAPIキーを設定し、FavHubへ戻ってください。`;
   urlBox.textContent = url;
-  openBtn.onclick = () => openApiConsoleUrl(url);
+  openBtn.onclick = () => openUrlExternally(url);
 
   overlay.style.display = 'flex';
   overlay.setAttribute('aria-hidden', 'false');
@@ -2865,7 +2946,7 @@ function openApiConsoleBrowser(url, service = '') {
  * Browserプラグインが未導入/実行に失敗した場合だけ同一WebViewへフォールバックする。
  * target=_blank / window.open は使わない（HTMLtoAPKBuilder環境でアプリ終了につながるため）。
  */
-async function openApiConsoleUrl(url) {
+async function openUrlExternally(url) {
   if (!url) return;
   closeApiConsoleBrowser();
   try {
