@@ -518,7 +518,7 @@ button:disabled { opacity:.38; cursor:not-allowed; }
 <div id="url-link-modal" class="modal-overlay">
   <div class="modal-content">
     <h3><span class="drawer-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 11.5a3 3 0 0 0 4.24 0l2.5-2.5a3 3 0 0 0-4.24-4.24l-1.2 1.2"/><path d="M11.5 8.5a3 3 0 0 0-4.24 0l-2.5 2.5a3 3 0 0 0 4.24 4.24l1.2-1.2"/></svg></span>URLリンク設定</h3>
-    <p class="sub">AIの返信文中に含まれるURLはタップで開けます。オンにすると外部ブラウザ（Chrome等）を起動して開き、オフ（デフォルト）だとFavHubのアプリ画面内でそのページへ遷移します。</p>
+    <p class="sub">AIの返信文中に含まれるURLはタップで開けます。オフ（デフォルト）だとFavHubのアプリ内ブラウザでその場に留まったまま開き、オンにすると既定の外部ブラウザ（Chrome等）を起動して開きます。</p>
     <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
       <input type="checkbox" id="url-link-external-toggle" style="width:16px; height:16px;">
       <span style="font-size:12px; color:#ccc;">リンクを外部ブラウザで開く</span>
@@ -780,14 +780,18 @@ function linkifyResponseText(text = '') {
   });
 }
 // チャット内リンクのタップ時の遷移先を決める。
-// 実機確認の結果、Capacitor Browser.open()は実際に外部ブラウザ（Chrome等）を起動し、
-// window.location.hrefはアプリのWebView内に留まったまま遷移することを確認済み。
-// そのためURLリンク設定ON＝Capacitor Browser（外部ブラウザ起動）、OFF＝WebView内遷移（アプリ内）とする。
+// 実機での複数回の検証により、Capacitor Browser.open()はアプリ内に留まる内部ブラウザ
+// （Custom Tabs／SFSafariViewController）として開き、window.location.hrefの方はCapacitorの
+// WebViewナビゲーション制限に引っかかって既定の外部ブラウザ（Chrome等）へインテントで遷移することを確認済み。
+// そのためURLリンク設定ON＝window.location.href（外部ブラウザ起動）、OFF＝Capacitor Browser（アプリ内）とする。
 function openChatLinkUrl(url) {
   if (!url) return;
-  if (AppState.UrlLinkExternalEnabled) { openUrlViaCapacitorBrowser(url); return; }
-  try { window.location.href = url; }
-  catch (e) { console.warn('In-app link navigation failed:', e); }
+  if (AppState.UrlLinkExternalEnabled) {
+    try { window.location.href = url; }
+    catch (e) { console.warn('External link navigation failed:', e); }
+    return;
+  }
+  openUrlViaCapacitorBrowser(url);
 }
 function formatDate(iso) {
   try { return new Intl.DateTimeFormat('ja-JP', { dateStyle:'medium', timeStyle:'short' }).format(new Date(iso)); }
