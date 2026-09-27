@@ -293,6 +293,8 @@ button:disabled { opacity:.38; cursor:not-allowed; }
           <button type="button" role="menuitem" data-attach-type="image">画像</button>
           <button type="button" role="menuitem" data-attach-type="camera">カメラ</button>
           <button type="button" role="menuitem" data-attach-type="audio">音声（文字起こし用）</button>
+          <button type="button" role="menuitem" data-attach-type="pdf">PDF</button>
+          <button type="button" role="menuitem" data-attach-type="video">動画</button>
           <button type="button" role="menuitem" data-attach-type="file">ファイル</button>
         </div>
       </div>
@@ -406,6 +408,35 @@ button:disabled { opacity:.38; cursor:not-allowed; }
       <span style="font-size:12px; color:#ccc;">FLEX推論（service_tier: flex）を使用する</span>
     </label>
     <div style="font-size:10.5px; color:#888; margin-top:4px;">コストを抑制できる代わりに、応答が大幅に遅くなる（数分〜）可能性があります。混雑時は処理自体が拒否されることもあります（対応モデルのみ有効）。</div>
+
+    <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-top:14px;">
+      <input type="checkbox" id="gemini-url-context-toggle" style="width:16px; height:16px;">
+      <span style="font-size:12px; color:#ccc;">URL contextを使用する</span>
+    </label>
+    <div style="font-size:10.5px; color:#888; margin-top:4px;">プロンプト中に含まれるURL（最大20件、1件34MBまで）の中身をGeminiが取得し、その内容を踏まえて回答します。対応形式はHTML/テキスト/画像/PDF。動画・音声URL、YouTube、ログインが必要なページ、ペイウォール記事には未対応です。</div>
+
+    <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-top:14px;">
+      <input type="checkbox" id="gemini-code-execution-toggle" style="width:16px; height:16px;">
+      <span style="font-size:12px; color:#ccc;">Code executionを使用する</span>
+    </label>
+    <div style="font-size:10.5px; color:#888; margin-top:4px;">計算・データ処理が必要と判断した場合にGeminiがPythonコードを自動生成・実行し（最大30秒/実行環境内で完結）、結果を踏まえて回答します。追加課金はありませんが、生成コード・実行結果もトークンとして計上されます。</div>
+
+    <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-top:14px;">
+      <input type="checkbox" id="gemini-maps-grounding-toggle" style="width:16px; height:16px;">
+      <span style="font-size:12px; color:#ccc;">Google Mapsでグラウンディングする</span>
+    </label>
+    <div style="font-size:10.5px; color:#888; margin-top:4px;">近隣のお店・施設など位置に関する質問に対し、Googleマップの実データ（店舗名・レビュー・営業時間等）を根拠に回答します（英語プロンプトのみ対応。検索実行ごとに課金対象になる場合があります）。</div>
+    <div style="display:flex; gap:8px; margin-top:8px;">
+      <div style="flex:1;">
+        <label style="font-size:10.5px;">緯度（任意）</label>
+        <input type="text" id="gemini-maps-lat-input" placeholder="例: 34.050481" inputmode="decimal">
+      </div>
+      <div style="flex:1;">
+        <label style="font-size:10.5px;">経度（任意）</label>
+        <input type="text" id="gemini-maps-lng-input" placeholder="例: -118.248526" inputmode="decimal">
+      </div>
+    </div>
+    <div style="font-size:10.5px; color:#888; margin-top:4px;">「近くの」等の現在地基準の質問に使われます。空欄の場合は位置情報なしで検索されます。</div>
 
     <label style="font-size:11px; margin-top:22px; display:block;">音声生成モデルへのVoice指定</label>
     <input type="text" id="gemini-tts-voice-input" placeholder="例: Kore, Puck, Zephyr...">
@@ -1088,6 +1119,21 @@ const AppState = {
   // コストを抑えられる代わりに応答が遅くなる・sheddable（枠が無ければ弾かれる）可能性がある。
   GeminiFlexInferenceEnabled: localStorage.getItem('favhub_gemini_flex_inference_enabled') === 'true',
 
+  // URL context tool（公式: ai.google.dev/gemini-api/docs/url-context）。デフォルトOFF。
+  // 有効時、プロンプト中のURLの中身をGeminiが取得して回答の根拠にする（画像/PDF/HTML等に対応、動画・音声URLは非対応）。
+  GeminiUrlContextEnabled: localStorage.getItem('favhub_gemini_url_context') === 'true',
+
+  // Code execution tool（公式: ai.google.dev/gemini-api/docs/code-execution）。デフォルトOFF。
+  // 有効時、Geminiが必要に応じてPythonコードを生成・実行し、その結果を踏まえて回答する。
+  GeminiCodeExecutionEnabled: localStorage.getItem('favhub_gemini_code_execution') === 'true',
+
+  // Grounding with Google Maps（公式: ai.google.dev/gemini-api/docs/maps-grounding）。デフォルトOFF。
+  // 有効時、Googleマップのデータ（店舗・レビュー・営業時間等）を根拠に位置関連の質問へ回答する。
+  GeminiMapsGroundingEnabled: localStorage.getItem('favhub_gemini_maps_grounding') === 'true',
+  // Maps Groundingに渡す緯度・経度（任意入力。空欄ならlatLng無しで送信＝位置情報なしの一般的な検索）。
+  GeminiMapsLatitude: localStorage.getItem('favhub_gemini_maps_lat') || '',
+  GeminiMapsLongitude: localStorage.getItem('favhub_gemini_maps_lng') || '',
+
   // gemini-3.8-flash-tts / gemini-3.8-flash-lite-tts 等のTTSモデル利用時に使う音声（prebuilt voice名）。
   // 公式ドキュメントのプリビルドボイス一覧（Kore, Puck, Zephyr...）から指定する。未設定時はKore。
   GeminiTTSVoice: localStorage.getItem('favhub_gemini_tts_voice') || 'Kore',
@@ -1393,10 +1439,11 @@ async function providerError(response, provider) {
   return e;
 }
 function buildAttachmentText(attachments = []) {
-  // 音声添付はbase64バイナリであり、テキストとしてそのままプロンプトに埋め込むと
-  // 意味を持たない上に無駄にトークンを消費するため除外する（ChatGPT/ClaudeCodeは
-  // 現状この添付を音声として送る手段が無いため、単純に無視する）。
-  return attachments.filter(a => !a.isImage && !a.isAudio).map(a => `\n\n【添付ファイル: ${a.name}】\n${a.data}`).join('');
+  // 音声・PDF・動画添付はいずれもbase64バイナリであり、テキストとしてそのままプロンプトに
+  // 埋め込むと意味を持たない上に無駄にトークンを消費するため除外する（ChatGPT/ClaudeCodeは
+  // 現状これらをそのまま送る手段が無いため、単純に無視する。Gemini向けはsendGemini/
+  // sendGeminiInteraction側でinline_data等として個別に送信している）。
+  return attachments.filter(a => !a.isImage && !a.isAudio && !a.isPdf && !a.isVideo).map(a => `\n\n【添付ファイル: ${a.name}】\n${a.data}`).join('');
 }
 // Interaction APIで動画出力を明示する必要があるリクエストかを、モデル名ではなく
 // ユーザーの生成指示から判定する。通常のテキスト会話には影響しない。
@@ -1456,17 +1503,38 @@ const ProviderService = {
     const parts = [];
     let fullPrompt = prompt;
     attachments.forEach(a => {
-      // 音声添付は画像と同様にinline_dataで送る（Gemini Audio understanding。
-      // :generateContentは通常のマルチモーダルモデルでもaudio/*のinline_dataを受け付ける）。
-      if (a.isImage || a.isAudio) parts.push({ inline_data: { mime_type:a.mimeType, data:a.data.split(',')[1] } });
+      // 音声・PDF・動画添付は画像と同様にinline_dataで送る（公式ドキュメント準拠：
+      // Audio understanding / Document understanding / Video understandingいずれも
+      // :generateContentへinline_data{mime_type, data(base64)}で渡せる。
+      // PDF/動画は20MB超の場合Files APIの利用が推奨されるが、このアプリは単発リクエスト
+      // 方式のためinline送信のみをサポートする）。
+      if (a.isImage || a.isAudio || a.isPdf || a.isVideo) parts.push({ inline_data: { mime_type:a.mimeType, data:a.data.split(',')[1] } });
       else fullPrompt += `\n\n【添付ファイル: ${a.name}】\n${a.data}`;
     });
     if (fullPrompt.trim()) parts.push({ text: fullPrompt });
     const historyContents = history.map(h => ({ role: h.role === 'assistant' ? 'model' : 'user', parts:[{ text:h.content }] }));
     const bodyData = { contents: [...historyContents, { role:'user', parts }] };
     if (systemPrompt) bodyData.system_instruction = { parts:[{ text: systemPrompt }] };
-    // Google Search Grounding: 有効時のみ google_search ツールを付与する（generateContentの現行仕様）
-    if (AppState.GeminiSearchGroundingEnabled) bodyData.tools = [{ google_search: {} }];
+    // 有効化されたツールをすべて積み上げる（公式ドキュメント準拠、複数ツールの併用が可能）。
+    // ・Google Search Grounding: google_search（generateContentの現行仕様）
+    // ・URL context: url_context（ai.google.dev/gemini-api/docs/url-context）
+    // ・Code execution: code_execution（ai.google.dev/gemini-api/docs/code-execution）
+    // ・Grounding with Google Maps: googleMaps（ai.google.dev/gemini-api/docs/maps-grounding）
+    const geminiTools = [];
+    if (AppState.GeminiSearchGroundingEnabled) geminiTools.push({ google_search: {} });
+    if (AppState.GeminiUrlContextEnabled) geminiTools.push({ url_context: {} });
+    if (AppState.GeminiCodeExecutionEnabled) geminiTools.push({ code_execution: {} });
+    if (AppState.GeminiMapsGroundingEnabled) geminiTools.push({ googleMaps: {} });
+    if (geminiTools.length) bodyData.tools = geminiTools;
+    // Maps Groundingで緯度・経度が指定されている場合、toolConfig.retrievalConfig.latLngとして付与する
+    // （公式ドキュメントのREST例に準拠。「近くの」等の現在地基準の質問に使われる）。
+    if (AppState.GeminiMapsGroundingEnabled && AppState.GeminiMapsLatitude && AppState.GeminiMapsLongitude) {
+      const lat = parseFloat(AppState.GeminiMapsLatitude);
+      const lng = parseFloat(AppState.GeminiMapsLongitude);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        bodyData.toolConfig = { retrievalConfig: { latLng: { latitude: lat, longitude: lng } } };
+      }
+    }
     // 画像生成モデルには明示的に responseModalities: ["TEXT","IMAGE"] を指定しないと、
     // 実際の画像データを返さず「IMAGE_GENERATION」のようなテキストだけを返すことがある
     // （Google公式ドキュメントが必須としている設定）。画像出力に対応しないモデルに指定すると
@@ -1495,6 +1563,13 @@ const ProviderService = {
     const media = [];
     respParts.forEach(p => {
       if (typeof p.text === 'string') { text += p.text; return; }
+      // Code execution: モデルが生成・実行したコードとその結果をテキストとして表示に含める
+      // （公式ドキュメント準拠：`executableCode`/`codeExecutionResult`パート。フィールド名は
+      // レスポンスの表記ゆれ（camelCase/snake_case）両方を拾う）。
+      const execCode = p.executableCode || p.executable_code;
+      if (execCode?.code) { text += `\n\n\`\`\`${(execCode.language || 'python').toLowerCase()}\n${execCode.code}\n\`\`\`\n`; return; }
+      const execResult = p.codeExecutionResult || p.code_execution_result;
+      if (execResult && typeof execResult.output === 'string') { text += `\n実行結果:\n${execResult.output}\n`; return; }
       const inline = p.inlineData || p.inline_data;
       if (inline?.data) {
         const mimeType = inline.mimeType || inline.mime_type || 'application/octet-stream';
@@ -1518,6 +1593,10 @@ const ProviderService = {
       // gemini-3.5-transcribe / 音声理解向け：Interactions APIのAudioContentはimageと同様に
       // data（base64）+mime_typeのインライン形式を受け付ける（公式リファレンスのAudio Content例に準拠）。
       else if (a.isAudio) inputParts.push({ type:'audio', data:a.data.split(',')[1], mime_type:a.mimeType });
+      // PDF/動画添付も公式のInteractions API Input Content仕様に準拠し、
+      // それぞれtype:'document'/type:'video'でdata（base64）+mime_typeのインライン形式で送る。
+      else if (a.isPdf) inputParts.push({ type:'document', data:a.data.split(',')[1], mime_type:a.mimeType });
+      else if (a.isVideo) inputParts.push({ type:'video', data:a.data.split(',')[1], mime_type:a.mimeType });
       else fullPrompt += `\n\n【添付ファイル: ${a.name}】\n${a.data}`;
     });
     // TTSモデルはテキストを「読み上げる台本」としてそのまま扱うため、話し方の指定は
@@ -1577,9 +1656,22 @@ const ProviderService = {
           : { language_codes: [] }
       };
     }
-    // Google Search Grounding: 有効時のみ google_search ツールを付与する（Interactions APIのTool仕様）。
-    // TTS/transcribeは検索ツール・関数呼び出し等を一切サポートしないため付与しない。
-    if (AppState.GeminiSearchGroundingEnabled && !isTTS && !isTranscribe) bodyData.tools = [{ type: 'google_search' }];
+    // 有効化されたツールをすべて積み上げる（Interactions APIのTool仕様、公式ドキュメント準拠）。
+    // TTS/transcribeは検索ツール・関数呼び出し等を一切サポートしないため、いずれのツールも付与しない。
+    if (!isTTS && !isTranscribe) {
+      const geminiInteractionTools = [];
+      if (AppState.GeminiSearchGroundingEnabled) geminiInteractionTools.push({ type: 'google_search' });
+      if (AppState.GeminiUrlContextEnabled) geminiInteractionTools.push({ type: 'url_context' });
+      if (AppState.GeminiCodeExecutionEnabled) geminiInteractionTools.push({ type: 'code_execution' });
+      if (AppState.GeminiMapsGroundingEnabled) {
+        const mapsTool = { type: 'google_maps' };
+        const lat = parseFloat(AppState.GeminiMapsLatitude);
+        const lng = parseFloat(AppState.GeminiMapsLongitude);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) { mapsTool.latitude = lat; mapsTool.longitude = lng; }
+        geminiInteractionTools.push(mapsTool);
+      }
+      if (geminiInteractionTools.length) bodyData.tools = geminiInteractionTools;
+    }
     // FLEX推論: Interactions APIでも同じservice_tierフィールドで指定できる
     if (AppState.GeminiFlexInferenceEnabled) bodyData.service_tier = 'flex';
     const geminiInteractionTimeout = AppState.GeminiFlexInferenceEnabled ? GEMINI_FLEX_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
@@ -1603,6 +1695,15 @@ const ProviderService = {
         const kind = c.type === 'document' ? 'file' : c.type;
         if (c.data) media.push({ kind, mimeType: c.mime_type, dataUrl:`data:${c.mime_type};base64,${c.data}` });
         else if (c.uri) media.push({ kind, mimeType: c.mime_type, uri: c.uri });
+      }
+    });
+    // Code execution: code_execution_call（生成コード）/code_execution_resultステップを
+    // 順序通りにテキストへ差し込む（公式ドキュメント準拠のステップ形式）。
+    (data.steps || []).forEach(step => {
+      if (step.type === 'code_execution_call' && step.arguments?.code) {
+        text += `\n\n\`\`\`python\n${step.arguments.code}\n\`\`\`\n`;
+      } else if (step.type === 'code_execution_result' && typeof step.result === 'string') {
+        text += `\n実行結果:\n${step.result}\n`;
       }
     });
     onDelta(text);
@@ -2013,7 +2114,7 @@ const UI = {
     AppState.attachedFiles.forEach((file, idx) => {
       const chip = document.createElement('div');
       chip.className = 'file-chip';
-      chip.innerHTML = `${file.isImage ? '🖼' : (file.isAudio ? '🎵' : '📄')} ${escapeHtml(file.name)} <span onclick="UI.removeAttachment(${idx})">×</span>`;
+      chip.innerHTML = `${file.isImage ? '🖼' : (file.isAudio ? '🎵' : (file.isPdf ? '📕' : (file.isVideo ? '🎬' : '📄')))} ${escapeHtml(file.name)} <span onclick="UI.removeAttachment(${idx})">×</span>`;
       bar.appendChild(chip);
     });
   },
@@ -2183,6 +2284,16 @@ const UI = {
     if (interactionIdToggle) interactionIdToggle.checked = !!AppState.GeminiInteractionIdEnabled;
     const flexToggle = document.getElementById('gemini-flex-inference-toggle');
     if (flexToggle) flexToggle.checked = !!AppState.GeminiFlexInferenceEnabled;
+    const urlContextToggle = document.getElementById('gemini-url-context-toggle');
+    if (urlContextToggle) urlContextToggle.checked = !!AppState.GeminiUrlContextEnabled;
+    const codeExecutionToggle = document.getElementById('gemini-code-execution-toggle');
+    if (codeExecutionToggle) codeExecutionToggle.checked = !!AppState.GeminiCodeExecutionEnabled;
+    const mapsGroundingToggle = document.getElementById('gemini-maps-grounding-toggle');
+    if (mapsGroundingToggle) mapsGroundingToggle.checked = !!AppState.GeminiMapsGroundingEnabled;
+    const mapsLatInput = document.getElementById('gemini-maps-lat-input');
+    if (mapsLatInput) mapsLatInput.value = AppState.GeminiMapsLatitude || '';
+    const mapsLngInput = document.getElementById('gemini-maps-lng-input');
+    if (mapsLngInput) mapsLngInput.value = AppState.GeminiMapsLongitude || '';
     const ttsVoiceInput = document.getElementById('gemini-tts-voice-input');
     if (ttsVoiceInput) ttsVoiceInput.value = AppState.GeminiTTSVoice || '';
     const ttsStyleInput = document.getElementById('gemini-tts-style-input');
@@ -2455,19 +2566,35 @@ const UI = {
       if (!file) return;
       const isImage = file.type.startsWith('image/');
       const isAudio = file.type.startsWith('audio/');
+      // PDF/動画は拡張子だけでなくMIMEでも判定する（"ファイル"経由でMIMEが空の場合は拡張子で補完）。
+      const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
+      const isVideo = file.type.startsWith('video/');
       if (isImage) {
         const compressed = await compressImage(file, 1024, 0.8);
-        AppState.attachedFiles.push({ name:file.name, mimeType:file.type || 'image/jpeg', isImage:true, isAudio:false, data:compressed });
+        AppState.attachedFiles.push({ name:file.name, mimeType:file.type || 'image/jpeg', isImage:true, isAudio:false, isPdf:false, isVideo:false, data:compressed });
       } else if (isAudio) {
         // 公式サポート形式（wav/mp3/aiff/aac/ogg/flac/mpeg/m4a/l16/opus/alaw/mulaw/webm）以外は
         // Gemini側で拒否される可能性があるため、送信前に軽く警告する。
         const supported = /^audio\/(wav|x-wav|mpeg|mp3|aiff|x-aiff|aac|ogg|flac|x-flac|m4a|x-m4a|l16|opus|alaw|mulaw|webm)/i.test(file.type);
         if (!supported) alert(`「${file.name}」の形式（${file.type || '不明'}）はGemini 3.5 Transcribeの対応形式と異なる可能性があります。送信は試行されますが、失敗する場合はWAV/MP3等に変換してください。`);
         const dataUrl = await readFileAsDataURL(file);
-        AppState.attachedFiles.push({ name:file.name, mimeType:file.type || 'audio/mpeg', isImage:false, isAudio:true, data:dataUrl });
+        AppState.attachedFiles.push({ name:file.name, mimeType:file.type || 'audio/mpeg', isImage:false, isAudio:true, isPdf:false, isVideo:false, data:dataUrl });
+      } else if (isPdf) {
+        // PDF/Document understanding（公式: ai.google.dev/gemini-api/docs/document-processing）。
+        // inline送信は合計リクエスト20MBまでが目安（超える場合は公式もFiles APIを推奨するが、
+        // このアプリは単発リクエスト方式のため未対応。ここでは軽く警告のみ行う）。
+        if (file.size > 20 * 1024 * 1024) alert(`「${file.name}」は20MBを超えています。Geminiへの送信（インライン方式）に失敗する可能性があります。`);
+        const dataUrl = await readFileAsDataURL(file);
+        AppState.attachedFiles.push({ name:file.name, mimeType:file.type || 'application/pdf', isImage:false, isAudio:false, isPdf:true, isVideo:false, data:dataUrl });
+      } else if (isVideo) {
+        // Video understanding（公式: ai.google.dev/gemini-api/docs/video-understanding）。
+        // inline送信は合計リクエスト20MB未満の短い動画向け。
+        if (file.size > 20 * 1024 * 1024) alert(`「${file.name}」は20MBを超えています。Geminiへの送信（インライン方式）に失敗する可能性があります。短い動画に分割するか、より小さいファイルをお試しください。`);
+        const dataUrl = await readFileAsDataURL(file);
+        AppState.attachedFiles.push({ name:file.name, mimeType:file.type || 'video/mp4', isImage:false, isAudio:false, isPdf:false, isVideo:true, data:dataUrl });
       } else {
         const textData = await file.text();
-        AppState.attachedFiles.push({ name:file.name, mimeType:file.type || 'text/plain', isImage:false, isAudio:false, data:textData });
+        AppState.attachedFiles.push({ name:file.name, mimeType:file.type || 'text/plain', isImage:false, isAudio:false, isPdf:false, isVideo:false, data:textData });
       }
       this.renderAttachmentChips();
     };
@@ -2480,6 +2607,8 @@ const UI = {
       if (type === 'image') { input.accept = 'image/*'; }
       else if (type === 'camera') { input.accept = 'image/*'; input.capture = 'environment'; }
       else if (type === 'audio') { input.accept = 'audio/*'; }
+      else if (type === 'pdf') { input.accept = 'application/pdf,.pdf'; }
+      else if (type === 'video') { input.accept = 'video/*'; }
       // type === 'file' の場合は従来通り種類を限定しない
       input.onchange = (e2) => handleAttachedFile((e2.target.files || [])[0]);
       input.click();
@@ -2526,6 +2655,26 @@ const UI = {
       const flexToggle = document.getElementById('gemini-flex-inference-toggle');
       AppState.GeminiFlexInferenceEnabled = flexToggle ? flexToggle.checked : false;
       localStorage.setItem('favhub_gemini_flex_inference_enabled', String(AppState.GeminiFlexInferenceEnabled));
+
+      const urlContextToggle = document.getElementById('gemini-url-context-toggle');
+      AppState.GeminiUrlContextEnabled = urlContextToggle ? urlContextToggle.checked : false;
+      localStorage.setItem('favhub_gemini_url_context', String(AppState.GeminiUrlContextEnabled));
+
+      const codeExecutionToggle = document.getElementById('gemini-code-execution-toggle');
+      AppState.GeminiCodeExecutionEnabled = codeExecutionToggle ? codeExecutionToggle.checked : false;
+      localStorage.setItem('favhub_gemini_code_execution', String(AppState.GeminiCodeExecutionEnabled));
+
+      const mapsGroundingToggle = document.getElementById('gemini-maps-grounding-toggle');
+      AppState.GeminiMapsGroundingEnabled = mapsGroundingToggle ? mapsGroundingToggle.checked : false;
+      localStorage.setItem('favhub_gemini_maps_grounding', String(AppState.GeminiMapsGroundingEnabled));
+
+      const mapsLatInput = document.getElementById('gemini-maps-lat-input');
+      AppState.GeminiMapsLatitude = mapsLatInput ? mapsLatInput.value.trim() : '';
+      localStorage.setItem('favhub_gemini_maps_lat', AppState.GeminiMapsLatitude);
+
+      const mapsLngInput = document.getElementById('gemini-maps-lng-input');
+      AppState.GeminiMapsLongitude = mapsLngInput ? mapsLngInput.value.trim() : '';
+      localStorage.setItem('favhub_gemini_maps_lng', AppState.GeminiMapsLongitude);
 
       const ttsVoiceInput = document.getElementById('gemini-tts-voice-input');
       AppState.GeminiTTSVoice = (ttsVoiceInput && ttsVoiceInput.value.trim()) || 'Kore';
