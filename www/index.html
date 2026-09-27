@@ -288,18 +288,16 @@ button:disabled { opacity:.38; cursor:not-allowed; }
     <div class="attachment-bar" id="attachment-bar"></div>
     <div class="input-row">
       <div class="attach-select-wrap">
-        <button id="attach-btn" class="command-icon" aria-label="ファイルを添付" aria-haspopup="true" aria-expanded="false">📎</button>
+        <button id="attach-btn" class="command-icon" aria-label="添付・カメラ・音声入力" aria-haspopup="true" aria-expanded="false">✚</button>
         <div id="attach-select-list" class="attach-select-list" role="menu" hidden>
           <button type="button" role="menuitem" data-attach-type="image">画像</button>
           <button type="button" role="menuitem" data-attach-type="camera">カメラ</button>
-          <button type="button" role="menuitem" data-attach-type="audio">音声（文字起こし用）</button>
-          <button type="button" role="menuitem" data-attach-type="pdf">PDF</button>
           <button type="button" role="menuitem" data-attach-type="video">動画</button>
           <button type="button" role="menuitem" data-attach-type="file">ファイル</button>
+          <button type="button" role="menuitem" id="attach-mic-item">🎙 音声入力</button>
         </div>
       </div>
       <textarea id="user-input" rows="1" placeholder="入力してください" aria-label="メッセージを入力"></textarea>
-      <button id="mic-btn" class="command-icon" aria-label="音声入力">🎙</button>
       <button id="send-btn" class="send-button" aria-label="送る">送る</button>
       <button id="stop-btn" class="stop-button" aria-label="停止" hidden>停止</button>
     </div>
@@ -423,7 +421,7 @@ button:disabled { opacity:.38; cursor:not-allowed; }
 
     <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-top:14px;">
       <input type="checkbox" id="gemini-maps-grounding-toggle" style="width:16px; height:16px;">
-      <span style="font-size:12px; color:#ccc;">Google Mapsでグラウンディングする</span>
+      <span style="font-size:12px; color:#ccc;">Google Mapsでグラウンディングする(EnglishPromptOnly)</span>
     </label>
     <div style="font-size:10.5px; color:#888; margin-top:4px;">近隣のお店・施設など位置に関する質問に対し、Googleマップの実データ（店舗名・レビュー・営業時間等）を根拠に回答します（英語プロンプトのみ対応。検索実行ごとに課金対象になる場合があります）。</div>
     <div style="display:flex; gap:8px; margin-top:8px;">
@@ -852,13 +850,34 @@ function mediaExtFromMime(mimeType = '') {
 function looksLikeHallucinatedMediaTag(text = '') {
   return /<img\s+[^>]*src=|!\[[^\]]*\]\([^)]+\)|googleusercontent\.com|<video\s+[^>]*src=/i.test(text);
 }
-// 生成物（画像/音声/動画/ファイル）を端末へ保存する。外部URIは扱わない。
-function downloadMediaItem(item, idx = 0) {
-  if (!item?.dataUrl) return;
+// 生成物（画像/音声/動画/ファイル）を端末へ保存する。
+// Gemini Interactions APIはPDF等の生成物をbase64（data）ではなくuriのみで返すことがあり、
+// その場合はdataUrlが存在しないため、以前は何もせず終わっていた（ダウンロードボタンが無反応になる不具合）。
+// uriのみの場合はAPIキー付きでfetchしてBlob化し、それをダウンロードする。
+async function downloadMediaItem(item, idx = 0) {
+  if (!item) return;
   const filename = `favhub_${item.kind || 'file'}_${Date.now()}_${idx}.${mediaExtFromMime(item.mimeType)}`;
+  let href = item.dataUrl;
+  let objectUrlToRevoke = null;
+  if (!href && item.uri) {
+    try {
+      const apiKey = AppState.keys.Gemini || (await getSecure('apiKey.Gemini')) || '';
+      const res = await fetch(item.uri, apiKey ? { headers: { 'x-goog-api-key': apiKey } } : {});
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      href = URL.createObjectURL(blob);
+      objectUrlToRevoke = href;
+    } catch (e) {
+      console.warn('生成物のダウンロードに失敗しました:', e);
+      alert('生成物のダウンロードに失敗しました。通信状況をご確認のうえ、再度お試しください。');
+      return;
+    }
+  }
+  if (!href) return;
   const a = document.createElement('a');
-  a.href = item.dataUrl; a.download = filename;
+  a.href = href; a.download = filename;
   document.body.appendChild(a); a.click(); a.remove();
+  if (objectUrlToRevoke) setTimeout(() => URL.revokeObjectURL(objectUrlToRevoke), 10000);
 }
 
 // このチャット（conversationHistory）中に生成された画像/音声/動画/ファイルを、
@@ -869,7 +888,7 @@ function buildSessionMediaGallery(history = []) {
   (history || []).forEach((h, turnIndex) => {
     if (h.role !== 'assistant' || !Array.isArray(h.media)) return;
     h.media.forEach((item, itemIndex) => {
-      if (item && item.dataUrl) gallery.push({ ...item, turnIndex, itemIndex, timestamp: h.timestamp });
+      if (item && (item.dataUrl || item.uri)) gallery.push({ ...item, turnIndex, itemIndex, timestamp: h.timestamp });
     });
   });
   return gallery;
@@ -883,9 +902,9 @@ function openMediaLightbox(item, idx = 0) {
   if (!overlay || !content || !item) return;
   content.innerHTML = '';
   let el;
-  if (item.kind === 'image') { el = document.createElement('img'); el.src = item.dataUrl; el.alt = '生成された画像'; }
-  else if (item.kind === 'video') { el = document.createElement('video'); el.src = item.dataUrl; el.controls = true; }
-  else if (item.kind === 'audio') { el = document.createElement('audio'); el.src = item.dataUrl; el.controls = true; }
+  if (item.kind === 'image') { el = document.createElement('img'); el.src = item.dataUrl || item.uri; el.alt = '生成された画像'; }
+  else if (item.kind === 'video') { el = document.createElement('video'); el.src = item.dataUrl || item.uri; el.controls = true; }
+  else if (item.kind === 'audio') { el = document.createElement('audio'); el.src = item.dataUrl || item.uri; el.controls = true; }
   else { el = document.createElement('div'); el.className = 'media-file-link-disabled'; el.textContent = `📄 ${item.mimeType || 'ファイル'}（プレビュー非対応。ダウンロードしてご確認ください）`; }
   content.appendChild(el);
   if (dlBtn) dlBtn.onclick = () => downloadMediaItem(item, idx);
@@ -2134,10 +2153,10 @@ const UI = {
     if(!media || !media.length){box.hidden=true;return;}
     const grid=document.createElement('div'); grid.className='response-media-grid'; const ready=[];
     media.forEach((item,idx)=>{
-      if(!item?.dataUrl)return; const wrap=document.createElement('div'); wrap.className='response-media-item';
+      if(!item?.dataUrl && !item?.uri)return; const wrap=document.createElement('div'); wrap.className='response-media-item';
       const thumb=document.createElement('button'); thumb.type='button'; thumb.className='response-media-thumb'; thumb.setAttribute('aria-label','生成物を拡大表示');
-      if(item.kind==='image'){const img=document.createElement('img');img.src=item.dataUrl;img.alt='生成された画像';ready.push(waitForMediaElementReady(img));thumb.appendChild(img);}
-      else if(item.kind==='video'){const vid=document.createElement('video');vid.src=item.dataUrl;vid.muted=true;ready.push(waitForMediaElementReady(vid));thumb.appendChild(vid);}
+      if(item.kind==='image'){const img=document.createElement('img');img.src=item.dataUrl||item.uri;img.alt='生成された画像';ready.push(waitForMediaElementReady(img));thumb.appendChild(img);}
+      else if(item.kind==='video'){const vid=document.createElement('video');vid.src=item.dataUrl||item.uri;vid.muted=true;ready.push(waitForMediaElementReady(vid));thumb.appendChild(vid);}
       else if(item.kind==='audio')thumb.textContent='🎵'; else thumb.textContent='📄';
       thumb.onclick=()=>openMediaLightbox(item,idx); wrap.appendChild(thumb);
       const dlBtn=document.createElement('button');dlBtn.type='button';dlBtn.className='response-media-dl';dlBtn.setAttribute('aria-label','ダウンロード');dlBtn.textContent='⬇';dlBtn.onclick=(e)=>{e.stopPropagation();downloadMediaItem(item,idx);};wrap.appendChild(dlBtn);grid.appendChild(wrap);
@@ -2522,26 +2541,7 @@ const UI = {
       };
     });
 
-    /* --- 音声入力 --- */
-    const micBtn = document.getElementById('mic-btn');
-    const userInput = document.getElementById('user-input');
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (SpeechRecognition) {
-      AppState.recognition = new SpeechRecognition();
-      AppState.recognition.lang = 'ja-JP'; AppState.recognition.continuous = false; AppState.recognition.interimResults = false;
-      AppState.recognition.onstart = () => { AppState.isRecording = true; micBtn.classList.add('recording'); };
-      AppState.recognition.onresult = (e) => { if (userInput && e.results) { userInput.value += (userInput.value ? ' ' : '') + e.results[0][0].transcript; autosize(); } };
-      AppState.recognition.onerror = (e) => { AppState.isRecording = false; micBtn.classList.remove('recording'); if (e.error === 'not-allowed') alert('マイク機能の利用が許可されていません。'); };
-      AppState.recognition.onend = () => { AppState.isRecording = false; micBtn.classList.remove('recording'); };
-      micBtn.onclick = () => {
-        if (!AppState.isRecording) { try { AppState.recognition.start(); } catch { micBtn.classList.remove('recording'); } }
-        else AppState.recognition.stop();
-      };
-    } else {
-      micBtn.onclick = () => { this.setWaitingText('この環境では音声入力を利用できません。'); setTimeout(() => this.setWaitingText(''), 2500); };
-    }
-
-    /* --- ファイル添付（画像・カメラ・ファイルの3択） --- */
+    /* --- ファイル添付（画像・カメラ・動画・ファイル・音声入力を1つのメニューに統合） --- */
     const attachBtn = document.getElementById('attach-btn');
     const attachList = document.getElementById('attach-select-list');
     const openAttachList = () => { attachList.hidden = false; attachBtn.setAttribute('aria-expanded', 'true'); };
@@ -2598,21 +2598,46 @@ const UI = {
       }
       this.renderAttachmentChips();
     };
-    attachList.addEventListener('click', (e) => {
-      const optBtn = e.target.closest('[data-attach-type]'); if (!optBtn) return;
-      closeAttachList();
-      const type = optBtn.dataset.attachType;
+    // ファイル選択ダイアログ（種類ごとにaccept/captureを出し分ける）を起動する共通処理。
+    const launchFilePicker = (type) => {
       const input = document.createElement('input');
       input.type = 'file';
       if (type === 'image') { input.accept = 'image/*'; }
       else if (type === 'camera') { input.accept = 'image/*'; input.capture = 'environment'; }
-      else if (type === 'audio') { input.accept = 'audio/*'; }
-      else if (type === 'pdf') { input.accept = 'application/pdf,.pdf'; }
       else if (type === 'video') { input.accept = 'video/*'; }
-      // type === 'file' の場合は従来通り種類を限定しない
+      // type === 'file' の場合は従来通り種類を限定しない（PDF/音声もここから添付すると自動判定される）
       input.onchange = (e2) => handleAttachedFile((e2.target.files || [])[0]);
       input.click();
+    };
+    attachList.addEventListener('click', (e) => {
+      const optBtn = e.target.closest('[data-attach-type]'); if (!optBtn) return;
+      closeAttachList();
+      launchFilePicker(optBtn.dataset.attachType);
     });
+
+    /* --- 音声入力（添付メニュー内の「音声入力」項目から起動） --- */
+    const micBtn = document.getElementById('attach-mic-item');
+    const userInput = document.getElementById('user-input');
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    // メニューを閉じても録音中だとわかるよう、メニュー項目自体だけでなく「+」ボタンにも
+    // recordingクラスを付け外しする。
+    const setMicRecordingVisual = (on) => { micBtn.classList.toggle('recording', on); attachBtn.classList.toggle('recording', on); };
+    if (SpeechRecognition) {
+      AppState.recognition = new SpeechRecognition();
+      AppState.recognition.lang = 'ja-JP'; AppState.recognition.continuous = false; AppState.recognition.interimResults = false;
+      AppState.recognition.onstart = () => { AppState.isRecording = true; setMicRecordingVisual(true); };
+      AppState.recognition.onresult = (e) => { if (userInput && e.results) { userInput.value += (userInput.value ? ' ' : '') + e.results[0][0].transcript; autosize(); } };
+      AppState.recognition.onerror = (e) => { AppState.isRecording = false; setMicRecordingVisual(false); if (e.error === 'not-allowed') alert('マイク機能の利用が許可されていません。'); };
+      AppState.recognition.onend = () => { AppState.isRecording = false; setMicRecordingVisual(false); };
+      micBtn.onclick = () => {
+        closeAttachList();
+        if (!AppState.isRecording) { try { AppState.recognition.start(); } catch { setMicRecordingVisual(false); } }
+        else AppState.recognition.stop();
+      };
+    } else {
+      micBtn.onclick = () => { closeAttachList(); this.setWaitingText('この環境では音声入力を利用できません。'); setTimeout(() => this.setWaitingText(''), 2500); };
+    }
+
 
     /* --- 送信・停止 --- */
     document.getElementById('send-btn').onclick = () => this.handleSend();
