@@ -294,7 +294,7 @@ button:disabled { opacity:.38; cursor:not-allowed; }
           <button type="button" role="menuitem" data-attach-type="camera">カメラ</button>
           <button type="button" role="menuitem" data-attach-type="video">動画</button>
           <button type="button" role="menuitem" data-attach-type="file">ファイル</button>
-          <button type="button" role="menuitem" id="attach-mic-item">🎙 音声入力</button>
+          <button type="button" role="menuitem" id="attach-mic-item">音声入力</button>
         </div>
       </div>
       <textarea id="user-input" rows="1" placeholder="入力してください" aria-label="メッセージを入力"></textarea>
@@ -851,33 +851,71 @@ function looksLikeHallucinatedMediaTag(text = '') {
   return /<img\s+[^>]*src=|!\[[^\]]*\]\([^)]+\)|googleusercontent\.com|<video\s+[^>]*src=/i.test(text);
 }
 // 生成物（画像/音声/動画/ファイル）を端末へ保存する。
-// Gemini Interactions APIはPDF等の生成物をbase64（data）ではなくuriのみで返すことがあり、
-// その場合はdataUrlが存在しないため、以前は何もせず終わっていた（ダウンロードボタンが無反応になる不具合）。
-// uriのみの場合はAPIキー付きでfetchしてBlob化し、それをダウンロードする。
+// WebViewでは <a href="data:..."> のクリックがダウンロードとして扱われず、
+// ボタンを押しても何も起きないことがある（形式を問わず起きる既知の制約）。
+// これを避けるため、データは常に一旦Blob化してから保存する。
+// また、Gemini Interactions APIはPDF等の生成物をbase64（data）ではなくuriのみで
+// 返すことがあるため、その場合はAPIキー付きでfetchしてBlob化する。
+async function getMediaItemBlob(item) {
+  if (item.dataUrl) {
+    const res = await fetch(item.dataUrl);
+    return await res.blob();
+  }
+  if (item.uri) {
+    const apiKey = AppState.keys.Gemini || (await getSecure('apiKey.Gemini')) || '';
+    const res = await fetch(item.uri, apiKey ? { headers: { 'x-goog-api-key': apiKey } } : {});
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.blob();
+  }
+  return null;
+}
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
 async function downloadMediaItem(item, idx = 0) {
   if (!item) return;
   const filename = `favhub_${item.kind || 'file'}_${Date.now()}_${idx}.${mediaExtFromMime(item.mimeType)}`;
-  let href = item.dataUrl;
-  let objectUrlToRevoke = null;
-  if (!href && item.uri) {
+  let blob;
+  try {
+    blob = await getMediaItemBlob(item);
+  } catch (e) {
+    console.warn('生成物の取得に失敗しました:', e);
+    alert('生成物のダウンロードに失敗しました。通信状況をご確認のうえ、再度お試しください。');
+    return;
+  }
+  if (!blob) return;
+
+  // 1) Capacitor Filesystem + Shareプラグインが使える環境では、ネイティブの保存/共有シートを
+  //    経由するのが最も確実（WebViewのdata:/blob: URIダウンロードが機能しない環境でも、
+  //    こちらはOS標準の保存・共有ダイアログを使うため確実に動作する）。
+  const Filesystem = globalThis.Capacitor?.Plugins?.Filesystem;
+  const Share = globalThis.Capacitor?.Plugins?.Share;
+  if (Filesystem && Share) {
     try {
-      const apiKey = AppState.keys.Gemini || (await getSecure('apiKey.Gemini')) || '';
-      const res = await fetch(item.uri, apiKey ? { headers: { 'x-goog-api-key': apiKey } } : {});
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const blob = await res.blob();
-      href = URL.createObjectURL(blob);
-      objectUrlToRevoke = href;
-    } catch (e) {
-      console.warn('生成物のダウンロードに失敗しました:', e);
-      alert('生成物のダウンロードに失敗しました。通信状況をご確認のうえ、再度お試しください。');
+      const base64Data = await blobToBase64(blob);
+      const written = await Filesystem.writeFile({ path: filename, data: base64Data, directory: 'CACHE' });
+      await Share.share({ url: written.uri, title: filename });
       return;
+    } catch (e) {
+      console.warn('Filesystem/Shareでの保存に失敗しました。ブラウザ方式にフォールバックします:', e);
     }
   }
-  if (!href) return;
-  const a = document.createElement('a');
-  a.href = href; a.download = filename;
-  document.body.appendChild(a); a.click(); a.remove();
-  if (objectUrlToRevoke) setTimeout(() => URL.revokeObjectURL(objectUrlToRevoke), 10000);
+
+  // 2) フォールバック：Blob URL（blob:）をanchorクリックでダウンロードする。
+  //    data: URIを直接使うとWebViewでダウンロードが発火しないことがあるため、必ずBlob URLを経由する。
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement('a');
+    a.href = objectUrl; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 10000);
+  }
 }
 
 // このチャット（conversationHistory）中に生成された画像/音声/動画/ファイルを、
@@ -2622,17 +2660,31 @@ const UI = {
     // メニューを閉じても録音中だとわかるよう、メニュー項目自体だけでなく「+」ボタンにも
     // recordingクラスを付け外しする。
     const setMicRecordingVisual = (on) => { micBtn.classList.toggle('recording', on); attachBtn.classList.toggle('recording', on); };
+    const MIC_PERMISSION_DENIED_MESSAGE = 'マイクへのアクセスが許可されていません。端末の設定アプリ→アプリ→FavHub→権限（またはマイク）からアクセスを許可し、もう一度お試しください。';
     if (SpeechRecognition) {
       AppState.recognition = new SpeechRecognition();
       AppState.recognition.lang = 'ja-JP'; AppState.recognition.continuous = false; AppState.recognition.interimResults = false;
       AppState.recognition.onstart = () => { AppState.isRecording = true; setMicRecordingVisual(true); };
       AppState.recognition.onresult = (e) => { if (userInput && e.results) { userInput.value += (userInput.value ? ' ' : '') + e.results[0][0].transcript; autosize(); } };
-      AppState.recognition.onerror = (e) => { AppState.isRecording = false; setMicRecordingVisual(false); if (e.error === 'not-allowed') alert('マイク機能の利用が許可されていません。'); };
+      AppState.recognition.onerror = (e) => { AppState.isRecording = false; setMicRecordingVisual(false); if (e.error === 'not-allowed' || e.error === 'service-not-allowed') alert(MIC_PERMISSION_DENIED_MESSAGE); };
       AppState.recognition.onend = () => { AppState.isRecording = false; setMicRecordingVisual(false); };
-      micBtn.onclick = () => {
+      micBtn.onclick = async () => {
         closeAttachList();
-        if (!AppState.isRecording) { try { AppState.recognition.start(); } catch { setMicRecordingVisual(false); } }
-        else AppState.recognition.stop();
+        if (AppState.isRecording) { AppState.recognition.stop(); return; }
+        // WebView環境ではSpeechRecognition単体だとマイク権限のプロンプトが正しく出ないまま
+        // 即座に「許可されていません」エラーになることがあるため、先にgetUserMediaで
+        // マイクへのアクセスを明示的に要求し、権限ダイアログを確実に出してから開始する。
+        if (navigator.mediaDevices?.getUserMedia) {
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            stream.getTracks().forEach(t => t.stop()); // 権限確認のみが目的でストリーム自体は使わない
+          } catch (e) {
+            setMicRecordingVisual(false);
+            alert(MIC_PERMISSION_DENIED_MESSAGE);
+            return;
+          }
+        }
+        try { AppState.recognition.start(); } catch { setMicRecordingVisual(false); }
       };
     } else {
       micBtn.onclick = () => { closeAttachList(); this.setWaitingText('この環境では音声入力を利用できません。'); setTimeout(() => this.setWaitingText(''), 2500); };
