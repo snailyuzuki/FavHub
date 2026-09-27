@@ -629,8 +629,13 @@ button:disabled { opacity:.38; cursor:not-allowed; }
 </div>
 
 
-<script>
+<script type="module">
 // @ts-nocheck
+// Capacitor Native Plugins
+// ※このHTMLはCapacitorプロジェクトのWeb資産としてビルドする前提です。
+import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
+import { SpeechRecognition } from '@capacitor-community/speech-recognition';
 /* =========================================================================
  * FavHub — 仕様書 v1.2（AIアシスタントアプリ 実装v0.1）とデモHTMLの統合版
  *
@@ -857,11 +862,12 @@ function looksLikeHallucinatedMediaTag(text = '') {
 // また、Gemini Interactions APIはPDF等の生成物をbase64（data）ではなくuriのみで
 // 返すことがあるため、その場合はAPIキー付きでfetchしてBlob化する。
 async function getMediaItemBlob(item) {
-  if (item.dataUrl) {
+  if (item?.dataUrl) {
     const res = await fetch(item.dataUrl);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.blob();
   }
-  if (item.uri) {
+  if (item?.uri) {
     const apiKey = AppState.keys.Gemini || (await getSecure('apiKey.Gemini')) || '';
     const res = await fetch(item.uri, apiKey ? { headers: { 'x-goog-api-key': apiKey } } : {});
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -869,52 +875,61 @@ async function getMediaItemBlob(item) {
   }
   return null;
 }
+
 function blobToBase64(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+    reader.onload = () => {
+      const result = String(reader.result || '');
+      resolve(result.includes(',') ? result.split(',')[1] : result);
+    };
     reader.onerror = reject;
     reader.readAsDataURL(blob);
   });
 }
+
 async function downloadMediaItem(item, idx = 0) {
   if (!item) return;
+
   const filename = `favhub_${item.kind || 'file'}_${Date.now()}_${idx}.${mediaExtFromMime(item.mimeType)}`;
-  let blob;
-  try {
-    blob = await getMediaItemBlob(item);
-  } catch (e) {
-    console.warn('生成物の取得に失敗しました:', e);
-    alert('生成物のダウンロードに失敗しました。通信状況をご確認のうえ、再度お試しください。');
-    return;
-  }
-  if (!blob) return;
 
-  // 1) Capacitor Filesystem + Shareプラグインが使える環境では、ネイティブの保存/共有シートを
-  //    経由するのが最も確実（WebViewのdata:/blob: URIダウンロードが機能しない環境でも、
-  //    こちらはOS標準の保存・共有ダイアログを使うため確実に動作する）。
-  const Filesystem = globalThis.Capacitor?.Plugins?.Filesystem;
-  const Share = globalThis.Capacitor?.Plugins?.Share;
-  if (Filesystem && Share) {
+  try {
+    const blob = await getMediaItemBlob(item);
+    if (!blob) throw new Error('保存対象のデータがありません。');
+
+    // Capacitor Filesystemでネイティブ側へ保存。
+    const base64Data = await blobToBase64(blob);
+    const savedFile = await Filesystem.writeFile({
+      path: filename,
+      data: base64Data,
+      directory: Directory.Documents,
+      recursive: true,
+    });
+
+    // OS標準の共有／保存UIを開く。
+    await Share.share({
+      title: filename,
+      url: savedFile.uri,
+    });
+  } catch (error) {
+    console.error('ネイティブ保存失敗:', error);
+
+    // 通常ブラウザ／Capacitorプラグイン未導入時のフォールバック。
     try {
-      const base64Data = await blobToBase64(blob);
-      const written = await Filesystem.writeFile({ path: filename, data: base64Data, directory: 'CACHE' });
-      await Share.share({ url: written.uri, title: filename });
-      return;
-    } catch (e) {
-      console.warn('Filesystem/Shareでの保存に失敗しました。ブラウザ方式にフォールバックします:', e);
+      const blob = await getMediaItemBlob(item);
+      if (!blob) throw error;
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 10000);
+    } catch (fallbackError) {
+      console.error('ブラウザ保存にも失敗しました:', fallbackError);
+      alert('生成物の保存に失敗しました。通信状況とアプリのファイル権限をご確認ください。');
     }
-  }
-
-  // 2) フォールバック：Blob URL（blob:）をanchorクリックでダウンロードする。
-  //    data: URIを直接使うとWebViewでダウンロードが発火しないことがあるため、必ずBlob URLを経由する。
-  const objectUrl = URL.createObjectURL(blob);
-  try {
-    const a = document.createElement('a');
-    a.href = objectUrl; a.download = filename;
-    document.body.appendChild(a); a.click(); a.remove();
-  } finally {
-    setTimeout(() => URL.revokeObjectURL(objectUrl), 10000);
   }
 }
 
@@ -2653,41 +2668,66 @@ const UI = {
       launchFilePicker(optBtn.dataset.attachType);
     });
 
-    /* --- 音声入力（添付メニュー内の「音声入力」項目から起動） --- */
+    /* --- 音声入力（Capacitor Speech Recognition） --- */
     const micBtn = document.getElementById('attach-mic-item');
     const userInput = document.getElementById('user-input');
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    // メニューを閉じても録音中だとわかるよう、メニュー項目自体だけでなく「+」ボタンにも
-    // recordingクラスを付け外しする。
-    const setMicRecordingVisual = (on) => { micBtn.classList.toggle('recording', on); attachBtn.classList.toggle('recording', on); };
-    const MIC_PERMISSION_DENIED_MESSAGE = 'マイクへのアクセスが許可されていません。端末の設定アプリ→アプリ→FavHub→権限（またはマイク）からアクセスを許可し、もう一度お試しください。';
-    if (SpeechRecognition) {
-      AppState.recognition = new SpeechRecognition();
-      AppState.recognition.lang = 'ja-JP'; AppState.recognition.continuous = false; AppState.recognition.interimResults = false;
-      AppState.recognition.onstart = () => { AppState.isRecording = true; setMicRecordingVisual(true); };
-      AppState.recognition.onresult = (e) => { if (userInput && e.results) { userInput.value += (userInput.value ? ' ' : '') + e.results[0][0].transcript; autosize(); } };
-      AppState.recognition.onerror = (e) => { AppState.isRecording = false; setMicRecordingVisual(false); if (e.error === 'not-allowed' || e.error === 'service-not-allowed') alert(MIC_PERMISSION_DENIED_MESSAGE); };
-      AppState.recognition.onend = () => { AppState.isRecording = false; setMicRecordingVisual(false); };
-      micBtn.onclick = async () => {
-        closeAttachList();
-        if (AppState.isRecording) { AppState.recognition.stop(); return; }
-        // WebView環境ではSpeechRecognition単体だとマイク権限のプロンプトが正しく出ないまま
-        // 即座に「許可されていません」エラーになることがあるため、先にgetUserMediaで
-        // マイクへのアクセスを明示的に要求し、権限ダイアログを確実に出してから開始する。
-        if (navigator.mediaDevices?.getUserMedia) {
-          try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            stream.getTracks().forEach(t => t.stop()); // 権限確認のみが目的でストリーム自体は使わない
-          } catch (e) {
-            setMicRecordingVisual(false);
+    const setMicRecordingVisual = (on) => {
+      if (micBtn) micBtn.classList.toggle('recording', on);
+      if (attachBtn) attachBtn.classList.toggle('recording', on);
+    };
+    const MIC_PERMISSION_DENIED_MESSAGE = 'マイク／音声認識の使用が許可されていません。端末の設定からFavHubのマイク権限と音声認識権限を許可して、もう一度お試しください。';
+
+    const startNativeSpeechRecognition = async () => {
+      if (!micBtn || !userInput) return;
+      closeAttachList();
+
+      try {
+        const { available } = await SpeechRecognition.available();
+        if (!available) {
+          alert('この端末では音声認識を利用できません。');
+          return;
+        }
+
+        const current = await SpeechRecognition.checkPermissions();
+        if (current.speechRecognition !== 'granted') {
+          const requested = await SpeechRecognition.requestPermissions();
+          if (requested.speechRecognition !== 'granted') {
             alert(MIC_PERMISSION_DENIED_MESSAGE);
             return;
           }
         }
-        try { AppState.recognition.start(); } catch { setMicRecordingVisual(false); }
+
+        AppState.isRecording = true;
+        setMicRecordingVisual(true);
+
+        const result = await SpeechRecognition.start({
+          language: 'ja-JP',
+          maxResults: 1,
+          prompt: '音声を入力してください',
+          partialResults: false,
+          popup: false,
+        });
+
+        const recognizedText = result?.matches?.[0] || '';
+        if (recognizedText) {
+          userInput.value += (userInput.value ? ' ' : '') + recognizedText;
+          autosize();
+          userInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      } catch (error) {
+        console.error('Capacitor音声入力エラー:', error);
+        alert(MIC_PERMISSION_DENIED_MESSAGE);
+      } finally {
+        AppState.isRecording = false;
+        setMicRecordingVisual(false);
+      }
+    };
+
+    if (micBtn) {
+      micBtn.onclick = async () => {
+        if (AppState.isRecording) return;
+        await startNativeSpeechRecognition();
       };
-    } else {
-      micBtn.onclick = () => { closeAttachList(); this.setWaitingText('この環境では音声入力を利用できません。'); setTimeout(() => this.setWaitingText(''), 2500); };
     }
 
 
