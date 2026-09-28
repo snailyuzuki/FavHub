@@ -629,13 +629,17 @@ button:disabled { opacity:.38; cursor:not-allowed; }
 </div>
 
 
-<script type="module">
+<script>
 // @ts-nocheck
 // Capacitor Native Plugins
-// ※このHTMLはCapacitorプロジェクトのWeb資産としてビルドする前提です。
-import { Filesystem, Directory } from '@capacitor/filesystem';
-import { Share } from '@capacitor/share';
-import { SpeechRecognition } from '@capacitor-community/speech-recognition';
+// ※このHTMLはビルドステップ（バンドラ）を通さず単体で読み込まれる前提のため、
+//   bare specifier（'@capacitor/filesystem' 等）のESM importは解決できない。
+//   ネイティブ側が注入するグローバル Capacitor.Plugins 経由でアクセスする
+//   （openUrlViaCapacitorBrowser と同じ作法に統一）。
+const Filesystem = globalThis.Capacitor?.Plugins?.Filesystem;
+const Directory = { Documents: 'DOCUMENTS' };
+const Share = globalThis.Capacitor?.Plugins?.Share;
+const SpeechRecognition = globalThis.Capacitor?.Plugins?.SpeechRecognition;
 /* =========================================================================
  * FavHub — 仕様書 v1.2（AIアシスタントアプリ 実装v0.1）とデモHTMLの統合版
  *
