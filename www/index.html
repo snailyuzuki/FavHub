@@ -632,14 +632,12 @@ button:disabled { opacity:.38; cursor:not-allowed; }
 <script>
 // @ts-nocheck
 // Capacitor Native Plugins
-// ※このHTMLはビルドステップ（バンドラ）を通さず単体で読み込まれる前提のため、
-//   bare specifier（'@capacitor/filesystem' 等）のESM importは解決できない。
-//   ネイティブ側が注入するグローバル Capacitor.Plugins 経由でアクセスする
-//   （openUrlViaCapacitorBrowser と同じ作法に統一）。
-const Filesystem = globalThis.Capacitor?.Plugins?.Filesystem;
-const Directory = { Documents: 'DOCUMENTS' };
-const Share = globalThis.Capacitor?.Plugins?.Share;
-const SpeechRecognition = globalThis.Capacitor?.Plugins?.SpeechRecognition;
+// raw www/index.html でも動作するよう、グローバルのCapacitor Pluginsを使用する。
+const CapacitorPlugins = globalThis.Capacitor?.Plugins || {};
+const Filesystem = CapacitorPlugins.Filesystem;
+const Share = CapacitorPlugins.Share;
+const SpeechRecognition = CapacitorPlugins.SpeechRecognition;
+const Camera = CapacitorPlugins.Camera;
 /* =========================================================================
  * FavHub — 仕様書 v1.2（AIアシスタントアプリ 実装v0.1）とデモHTMLの統合版
  *
@@ -906,7 +904,7 @@ async function downloadMediaItem(item, idx = 0) {
     const savedFile = await Filesystem.writeFile({
       path: filename,
       data: base64Data,
-      directory: Directory.Documents,
+      directory: 'DOCUMENTS',
       recursive: true,
     });
 
@@ -2660,16 +2658,42 @@ const UI = {
       const input = document.createElement('input');
       input.type = 'file';
       if (type === 'image') { input.accept = 'image/*'; }
-      else if (type === 'camera') { input.accept = 'image/*'; input.capture = 'environment'; }
       else if (type === 'video') { input.accept = 'video/*'; }
       // type === 'file' の場合は従来通り種類を限定しない（PDF/音声もここから添付すると自動判定される）
       input.onchange = (e2) => handleAttachedFile((e2.target.files || [])[0]);
       input.click();
     };
+
+    const launchNativeCamera = async () => {
+      try {
+        if (!Camera?.getPhoto) throw new Error('Capacitor Cameraが利用できません。');
+        const photo = await Camera.getPhoto({
+          source: 'CAMERA',
+          resultType: 'DATA_URL',
+          quality: 85,
+          width: 1600,
+          height: 1600,
+          correctOrientation: true,
+          saveToGallery: false,
+        });
+        if (!photo?.dataUrl) throw new Error('撮影画像を取得できませんでした。');
+        const blob = await (await fetch(photo.dataUrl)).blob();
+        const mimeType = photo.format ? `image/${photo.format}` : 'image/jpeg';
+        const file = new File([blob], `camera_${Date.now()}.jpg`, { type: mimeType });
+        await handleAttachedFile(file);
+      } catch (error) {
+        console.error('ネイティブカメラ起動エラー:', error);
+        if (error?.message && !/cancel/i.test(String(error.message))) {
+          alert('カメラを起動できませんでした。カメラ権限を確認してください。');
+        }
+      }
+    };
+
     attachList.addEventListener('click', (e) => {
       const optBtn = e.target.closest('[data-attach-type]'); if (!optBtn) return;
       closeAttachList();
-      launchFilePicker(optBtn.dataset.attachType);
+      if (optBtn.dataset.attachType === 'camera') launchNativeCamera();
+      else launchFilePicker(optBtn.dataset.attachType);
     });
 
     /* --- 音声入力（Capacitor Speech Recognition） --- */
@@ -2720,7 +2744,12 @@ const UI = {
         }
       } catch (error) {
         console.error('Capacitor音声入力エラー:', error);
-        alert(MIC_PERMISSION_DENIED_MESSAGE);
+        try {
+          const permission = await SpeechRecognition?.checkPermissions?.();
+          if (permission?.speechRecognition === 'denied') alert(MIC_PERMISSION_DENIED_MESSAGE);
+        } catch (permissionError) {
+          console.error('音声権限状態の確認にも失敗しました:', permissionError);
+        }
       } finally {
         AppState.isRecording = false;
         setMicRecordingVisual(false);
@@ -3045,7 +3074,14 @@ const UI = {
     AppState.abortController = new AbortController();
     const attachmentsToSend = [...AppState.attachedFiles];
     let output = '';
-    const onDelta = (delta) => { output += delta; AppState.CurrentAIOutput = output; this.renderResponseText(output); };
+    const onDelta = (delta) => {
+      output += delta;
+      AppState.CurrentAIOutput = output;
+      const visible = output.includes(HCONTEXT_DELIMITER)
+        ? output.slice(0, output.indexOf(HCONTEXT_DELIMITER)).trimEnd()
+        : output;
+      this.renderResponseText(visible);
+    };
     // onMedia受信時点では、まだそのターンの表示を確定しない
     // （成功パスでconversationHistoryへpushした後にまとめて累積ギャラリーとして描画する）。
     const onMedia = (media) => { AppState.CurrentAIOutputMedia = media; };
@@ -3188,7 +3224,8 @@ const UI = {
     const input = document.getElementById('user-input');
     input.value = ''; autosize();
     this.renderAttachmentChips();
-    this.hideOutputPanel();
+    this.showOutputPanel();
+    document.getElementById('response-box').textContent = '';
     setRequestState('Ready');
     appEl.dataset.illustrationState = 'Static';
 
