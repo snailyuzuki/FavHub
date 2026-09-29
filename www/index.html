@@ -146,6 +146,16 @@ button { cursor:pointer; }
 .input-row { display:flex; align-items:flex-end; gap:7px; }
 .command-icon { width:38px; height:42px; flex-shrink:0; border-radius:13px; border:1.5px solid rgba(255,255,255,.35); background:rgba(255,255,255,.06); color:rgba(255,255,255,.85); font-size:15px; }
 .command-icon.recording { background:var(--danger); }
+.speech-confirm-modal { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; z-index:120; background:rgba(0,0,0,.35); }
+.speech-confirm-modal[hidden] { display:none; }
+.speech-confirm-box { width:min(290px, calc(100vw - 40px)); padding:20px 18px 16px; border-radius:18px; background:rgba(18,17,45,.98); border:1.5px solid rgba(255,255,255,.45); box-shadow:var(--shadow); text-align:center; color:#fff; }
+.speech-confirm-title { font-size:16px; font-weight:700; margin-bottom:8px; }
+.speech-confirm-status { min-height:20px; font-size:13px; opacity:.9; margin-bottom:16px; }
+.speech-confirm-actions { display:flex; gap:10px; justify-content:center; }
+.speech-confirm-actions button { flex:1; min-height:40px; border-radius:10px; border:1px solid rgba(255,255,255,.25); color:#fff; background:rgba(255,255,255,.08); font-size:13px; }
+.speech-confirm-actions button.primary { background:var(--accent); border-color:transparent; }
+.speech-confirm-actions button:disabled { opacity:.45; }
+
 .command-bar textarea { flex:1; min-width:0; max-height:110px; overflow-y:auto; overflow-wrap:break-word; word-break:break-word; resize:none; border:0; outline:none; background:transparent; color:#fff; padding:10px 6px; line-height:1.4; font-size:14px; }
 .command-bar textarea::placeholder { color:rgba(255,255,255,.5); }
 .send-button, .stop-button { min-width:56px; height:42px; flex-shrink:0; border-radius:13px; border:0; font-weight:700; font-size:12px; }
@@ -2708,9 +2718,9 @@ const UI = {
     const userInput = document.getElementById('user-input');
     let speechStopRequested = false;
     let speechOperationBusy = false;
-    let speechRestartBlockedUntil = 0;
     let speechStopPromise = null;
-    const SPEECH_RESTART_COOLDOWN_MS = 900;
+    let speechConfirmTimer = null;
+    const SPEECH_PREPARE_DELAY_MS = 800;
 
     const setMicRecordingVisual = (on) => {
       if (micBtn) micBtn.classList.toggle('recording', on);
@@ -2718,8 +2728,63 @@ const UI = {
     };
     const MIC_PERMISSION_DENIED_MESSAGE = 'マイク／音声認識の使用が許可されていません。端末の設定からFavHubのマイク権限と音声認識権限を許可して、もう一度お試しください。';
 
+    const ensureSpeechConfirmModal = () => {
+      let modal = document.getElementById('speech-confirm-modal');
+      if (modal) return modal;
+      modal = document.createElement('div');
+      modal.id = 'speech-confirm-modal';
+      modal.className = 'speech-confirm-modal';
+      modal.hidden = true;
+      modal.innerHTML = `
+        <div class="speech-confirm-box" role="dialog" aria-modal="true" aria-labelledby="speech-confirm-title">
+          <div id="speech-confirm-title" class="speech-confirm-title">音声入力</div>
+          <div id="speech-confirm-status" class="speech-confirm-status">マイクを準備中…</div>
+          <div class="speech-confirm-actions">
+            <button type="button" id="speech-cancel-btn">キャンセル</button>
+            <button type="button" id="speech-start-btn" class="primary" disabled>開始</button>
+          </div>
+        </div>`;
+      document.body.appendChild(modal);
+      return modal;
+    };
+
+    const closeSpeechConfirmModal = () => {
+      if (speechConfirmTimer) {
+        clearTimeout(speechConfirmTimer);
+        speechConfirmTimer = null;
+      }
+      const modal = document.getElementById('speech-confirm-modal');
+      if (modal) modal.hidden = true;
+    };
+
+    const showSpeechConfirmModal = () => {
+      const modal = ensureSpeechConfirmModal();
+      const status = document.getElementById('speech-confirm-status');
+      const startBtn = document.getElementById('speech-start-btn');
+      const cancelBtn = document.getElementById('speech-cancel-btn');
+      if (!status || !startBtn || !cancelBtn) return;
+
+      status.textContent = 'マイクを準備中…';
+      startBtn.disabled = true;
+      modal.hidden = false;
+
+      cancelBtn.onclick = () => closeSpeechConfirmModal();
+      speechConfirmTimer = setTimeout(() => {
+        speechConfirmTimer = null;
+        if (modal.hidden) return;
+        status.textContent = '音声入力を開始できます';
+        startBtn.disabled = false;
+      }, SPEECH_PREPARE_DELAY_MS);
+
+      startBtn.onclick = async () => {
+        if (startBtn.disabled || speechOperationBusy) return;
+        closeSpeechConfirmModal();
+        await startNativeSpeechRecognition();
+      };
+    };
+
     // Android版プラグインでは stop() が解決しないケースが報告されているため、
-    // 停止処理は「待ち続けない」ようにしてUIを先に停止状態へ戻す。
+    // 停止処理は無期限にawaitせず、UIを先に停止状態へ戻す。
     const stopNativeSpeechRecognition = async () => {
       if (!AppState.isRecording && !speechOperationBusy) return;
       if (speechStopPromise) return speechStopPromise;
@@ -2727,15 +2792,13 @@ const UI = {
       speechStopRequested = true;
       AppState.isRecording = false;
       setMicRecordingVisual(false);
-      closeAttachList();
-      speechRestartBlockedUntil = Date.now() + SPEECH_RESTART_COOLDOWN_MS;
+      closeSpeechConfirmModal();
 
       try {
         if (!SpeechRecognition?.stop) return;
         speechStopPromise = Promise.resolve().then(() => SpeechRecognition.stop()).catch((error) => {
           console.error('Capacitor音声入力停止エラー:', error);
         });
-        // stop() 自体がハングするAndroid版があるため、ここでは無期限にawaitしない。
         await Promise.race([
           speechStopPromise,
           new Promise(resolve => setTimeout(resolve, 1200)),
@@ -2747,8 +2810,7 @@ const UI = {
 
     const startNativeSpeechRecognition = async () => {
       if (!micBtn || !userInput || speechOperationBusy) return;
-      if (Date.now() < speechRestartBlockedUntil) return;
-      closeAttachList();
+      closeSpeechConfirmModal();
       speechStopRequested = false;
       speechOperationBusy = true;
 
@@ -2772,6 +2834,8 @@ const UI = {
           }
         }
 
+        if (speechStopRequested) return;
+
         AppState.isRecording = true;
         setMicRecordingVisual(true);
 
@@ -2783,13 +2847,8 @@ const UI = {
           popup: false,
         });
 
-        // 停止操作後に遅れて結果が返ってきた場合も、取得できた最終結果は入力へ反映する。
         const recognizedText = result?.matches?.[0] || '';
-        if (recognizedText && !speechStopRequested) {
-          userInput.value += (userInput.value ? ' ' : '') + recognizedText;
-          autosize();
-          userInput.dispatchEvent(new Event('input', { bubbles: true }));
-        } else if (recognizedText && speechStopRequested) {
+        if (recognizedText) {
           userInput.value += (userInput.value ? ' ' : '') + recognizedText;
           autosize();
           userInput.dispatchEvent(new Event('input', { bubbles: true }));
@@ -2811,7 +2870,6 @@ const UI = {
         setMicRecordingVisual(false);
         speechOperationBusy = false;
         speechStopRequested = false;
-        speechRestartBlockedUntil = Math.max(speechRestartBlockedUntil, Date.now() + SPEECH_RESTART_COOLDOWN_MS);
       }
     };
 
@@ -2822,7 +2880,10 @@ const UI = {
           await stopNativeSpeechRecognition();
           return;
         }
-        await startNativeSpeechRecognition();
+        if (speechOperationBusy) return;
+
+        closeAttachList();
+        showSpeechConfirmModal();
       };
     }
 
