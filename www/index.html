@@ -2601,8 +2601,15 @@ const UI = {
     const attachList = document.getElementById('attach-select-list');
     const openAttachList = () => { attachList.hidden = false; attachBtn.setAttribute('aria-expanded', 'true'); };
     const closeAttachList = () => { attachList.hidden = true; attachBtn.setAttribute('aria-expanded', 'false'); };
-    attachBtn.onclick = (e) => {
+    attachBtn.onclick = async (e) => {
       e.stopPropagation();
+      // 音声入力中は、赤くなった「＋」を停止ボタンとして使う。
+      if (AppState.isRecording) {
+        if (typeof stopNativeSpeechRecognition === 'function') {
+          await stopNativeSpeechRecognition();
+        }
+        return;
+      }
       if (attachList.hidden) openAttachList(); else closeAttachList();
     };
     document.addEventListener('click', (e) => {
@@ -2699,17 +2706,57 @@ const UI = {
     /* --- 音声入力（Capacitor Speech Recognition） --- */
     const micBtn = document.getElementById('attach-mic-item');
     const userInput = document.getElementById('user-input');
+    let speechStopRequested = false;
+    let speechOperationBusy = false;
+    let speechRestartBlockedUntil = 0;
+    let speechStopPromise = null;
+    const SPEECH_RESTART_COOLDOWN_MS = 900;
+
     const setMicRecordingVisual = (on) => {
       if (micBtn) micBtn.classList.toggle('recording', on);
       if (attachBtn) attachBtn.classList.toggle('recording', on);
     };
     const MIC_PERMISSION_DENIED_MESSAGE = 'マイク／音声認識の使用が許可されていません。端末の設定からFavHubのマイク権限と音声認識権限を許可して、もう一度お試しください。';
 
-    const startNativeSpeechRecognition = async () => {
-      if (!micBtn || !userInput) return;
+    // Android版プラグインでは stop() が解決しないケースが報告されているため、
+    // 停止処理は「待ち続けない」ようにしてUIを先に停止状態へ戻す。
+    const stopNativeSpeechRecognition = async () => {
+      if (!AppState.isRecording && !speechOperationBusy) return;
+      if (speechStopPromise) return speechStopPromise;
+
+      speechStopRequested = true;
+      AppState.isRecording = false;
+      setMicRecordingVisual(false);
       closeAttachList();
+      speechRestartBlockedUntil = Date.now() + SPEECH_RESTART_COOLDOWN_MS;
 
       try {
+        if (!SpeechRecognition?.stop) return;
+        speechStopPromise = Promise.resolve().then(() => SpeechRecognition.stop()).catch((error) => {
+          console.error('Capacitor音声入力停止エラー:', error);
+        });
+        // stop() 自体がハングするAndroid版があるため、ここでは無期限にawaitしない。
+        await Promise.race([
+          speechStopPromise,
+          new Promise(resolve => setTimeout(resolve, 1200)),
+        ]);
+      } finally {
+        speechStopPromise = null;
+      }
+    };
+
+    const startNativeSpeechRecognition = async () => {
+      if (!micBtn || !userInput || speechOperationBusy) return;
+      if (Date.now() < speechRestartBlockedUntil) return;
+      closeAttachList();
+      speechStopRequested = false;
+      speechOperationBusy = true;
+
+      try {
+        if (!SpeechRecognition?.available || !SpeechRecognition?.start) {
+          throw new Error('Capacitor音声認識プラグインが利用できません。');
+        }
+
         const { available } = await SpeechRecognition.available();
         if (!available) {
           alert('この端末では音声認識を利用できません。');
@@ -2736,8 +2783,13 @@ const UI = {
           popup: false,
         });
 
+        // 停止操作後に遅れて結果が返ってきた場合も、取得できた最終結果は入力へ反映する。
         const recognizedText = result?.matches?.[0] || '';
-        if (recognizedText) {
+        if (recognizedText && !speechStopRequested) {
+          userInput.value += (userInput.value ? ' ' : '') + recognizedText;
+          autosize();
+          userInput.dispatchEvent(new Event('input', { bubbles: true }));
+        } else if (recognizedText && speechStopRequested) {
           userInput.value += (userInput.value ? ' ' : '') + recognizedText;
           autosize();
           userInput.dispatchEvent(new Event('input', { bubbles: true }));
@@ -2746,19 +2798,30 @@ const UI = {
         console.error('Capacitor音声入力エラー:', error);
         try {
           const permission = await SpeechRecognition?.checkPermissions?.();
-          if (permission?.speechRecognition === 'denied') alert(MIC_PERMISSION_DENIED_MESSAGE);
+          if (permission?.speechRecognition === 'denied') {
+            alert(MIC_PERMISSION_DENIED_MESSAGE);
+          } else if (!speechStopRequested) {
+            alert('音声入力を開始できませんでした。もう一度お試しください。');
+          }
         } catch (permissionError) {
           console.error('音声権限状態の確認にも失敗しました:', permissionError);
         }
       } finally {
         AppState.isRecording = false;
         setMicRecordingVisual(false);
+        speechOperationBusy = false;
+        speechStopRequested = false;
+        speechRestartBlockedUntil = Math.max(speechRestartBlockedUntil, Date.now() + SPEECH_RESTART_COOLDOWN_MS);
       }
     };
 
     if (micBtn) {
-      micBtn.onclick = async () => {
-        if (AppState.isRecording) return;
+      micBtn.onclick = async (e) => {
+        e.stopPropagation();
+        if (AppState.isRecording) {
+          await stopNativeSpeechRecognition();
+          return;
+        }
         await startNativeSpeechRecognition();
       };
     }
