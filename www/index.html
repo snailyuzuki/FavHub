@@ -87,7 +87,6 @@ button { cursor:pointer; }
 
 /* ---------- output panel (novel-window) ---------- */
 .output-panel { flex:0 1 auto; z-index:12; margin:0 12px 14px 12px; max-height:45dvh; min-height:0; border:1.5px solid rgba(255,255,255,.5); border-radius:20px; background:rgba(10,10,32,.68); box-shadow:var(--shadow); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); overflow:hidden; display:flex; flex-direction:column; transition:max-height .3s ease; cursor:pointer; }
-.output-panel[hidden] { display:none; }
 .output-panel.expanded { max-height:70dvh; }
 .output-head { display:flex; align-items:center; justify-content:space-between; padding:12px 15px 7px; border-bottom:1px solid rgba(255,255,255,.15); flex-shrink:0; }
 .output-reload-btn { flex-shrink:0; width:28px; height:28px; border-radius:50%; border:1.5px solid rgba(255,255,255,.35); background:rgba(255,255,255,.06); color:rgba(255,255,255,.35); display:grid; place-items:center; }
@@ -281,7 +280,7 @@ button:disabled { opacity:.38; cursor:not-allowed; }
 
   <div class="stage-spacer"></div>
 
-  <section id="output-panel" class="output-panel" hidden>
+  <section id="output-panel" class="output-panel">
     <div class="output-head">
       <div><span class="eyebrow">AI OUTPUT</span><span id="waiting-text" class="waiting-text"></span></div>
       <button type="button" id="regenerate-btn" class="output-reload-btn" aria-label="この回答を再生成" title="再読み込み">
@@ -1252,7 +1251,6 @@ const AppState = {
   // 現在進行中のやり取り履歴（マルチターン継続用）
   conversationHistory: safeJSONParse('favhub_conversation_history', []),
 
-  firstResponseReceived: false,
   isRecording: false,
   recognition: null,
   abortController: null,
@@ -1421,19 +1419,45 @@ function parseReplyWithHierarchicalContext(rawReply = '', previousContext) {
 }
 
 /* ---------------- 初期表示テキストのローテーション（15秒毎・HTML独自機能を踏襲） ---------------- */
+/* ---------------- 出力パネルの表示モード（保存せず、既存のstateから毎回導出する） ----------------
+ *  busy         : 送信〜描画中。本文はストリーミング側(onDelta→renderResponseText)が書く
+ *  idle         : まだ何も無い（初期表示テキストをローテーション表示する）
+ *  conversation : 返答/履歴がある、または失敗・中断などで本文が確定している
+ * 「会話がある」の判定を手動フラグの更新に頼らないための単一の判定点。 */
+const BUSY_REQUEST_STATES = ['Processing', 'ResponseReceived', 'Rendering'];
+function outputMode() {
+  if (BUSY_REQUEST_STATES.includes(AppState.RequestState)) return 'busy';
+  if (AppState.lastResponse || (AppState.conversationHistory && AppState.conversationHistory.length)) return 'conversation';
+  return AppState.RequestState === 'Ready' ? 'idle' : 'conversation';
+}
+function buildFullLog() {
+  const h = AppState.conversationHistory;
+  if (h && h.length) {
+    return h.map(x => `${x.role === 'user' ? '🧑 あなた' : `🤖 ${x.provider || 'AI'}`}\n${x.content}`).join('\n\n----------\n\n');
+  }
+  return AppState.lastResponse || 'まだやり取りがありません。';
+}
+
 const InitialTextManager = {
-  timer: null,
-  startRotation(cb = (t='') => {}) {
-    if (AppState.firstResponseReceived) return;
+  timer: null, service: null, index: 0,
+  /* idle中に呼ぶ。未起動 / サービス変更 / restart指定のときだけタイマーを張り直し、
+   * それ以外は進行位置を保ったまま現在のセリフを再描画するだけ。 */
+  ensureRunning(cb, { restart = false } = {}) {
+    const service = AppState.CurrentAIModel.service;
+    if (!currentServiceInitialTexts().length) return;
+    if (restart || !this.timer || this.service !== service) {
+      this.stop(); this.service = service; this.index = 0;
+      this.timer = setInterval(() => {
+        if (outputMode() !== 'idle') { this.stop(); return; }
+        const texts = currentServiceInitialTexts();
+        this.index = (this.index + 1) % texts.length;
+        cb(texts[this.index]);
+      }, INITIAL_TEXT_INTERVAL);
+    }
     const texts = currentServiceInitialTexts();
-    let idx = 0; cb(texts[0]);
-    if (this.timer) clearInterval(this.timer);
-    this.timer = setInterval(() => {
-      if (AppState.firstResponseReceived) { clearInterval(this.timer); return; }
-      idx = (idx + 1) % texts.length; cb(texts[idx]);
-    }, INITIAL_TEXT_INTERVAL);
+    cb(texts[this.index % texts.length]);
   },
-  stop() { if (this.timer) clearInterval(this.timer); }
+  stop() { if (this.timer) clearInterval(this.timer); this.timer = null; }
 };
 
 /* ---------------- 待機テキストのローテーション（3秒毎・仕様書 waiting-text.js 準拠） ---------------- */
@@ -2231,11 +2255,21 @@ const UI = {
     if(!opts.silent){box.classList.remove('media-just-generated');void box.offsetWidth;box.classList.add('media-just-generated');}
   },
 
-  showOutputPanel() { document.getElementById('output-panel').hidden = false; },
-  hideOutputPanel() {
+  /* 出力パネルの本文を「現在のモード」に合わせて描画する唯一の入口（busy中の本文はストリーミング側が担当）。
+   * restart: idleのとき初期テキストを先頭から流し直す（新規チャット用） */
+  syncOutputPanel({ restart = false } = {}) {
     const panel = document.getElementById('output-panel');
-    panel.hidden = true; panel.classList.remove('expanded');
-    document.getElementById('waiting-text').textContent = '';
+    const box = document.getElementById('response-box');
+    const mode = outputMode();
+    if (mode === 'idle') {
+      this.setWaitingText('');
+      InitialTextManager.ensureRunning((t) => { box.textContent = t; }, { restart });
+      return;
+    }
+    InitialTextManager.stop();
+    if (mode === 'conversation') {
+      box.innerHTML = linkifyResponseText(panel.classList.contains('expanded') ? buildFullLog() : AppState.lastResponse);
+    }
   },
   setWaitingText(text) { document.getElementById('waiting-text').textContent = text; },
 
@@ -2328,14 +2362,11 @@ const UI = {
     AppState.lastResponseMedia = sessionMedia;
     if (sessionMedia.length) saveLastResponseMedia(sessionMedia); else clearLastResponseMedia();
     this.renderResponseMedia(sessionMedia, { silent: true });
-    AppState.firstResponseReceived = true;
-    this.showOutputPanel();
-    const lines = AppState.conversationHistory.map(h => `${h.role === 'user' ? '🧑 あなた' : `🤖 ${h.provider || 'AI'}`}\n${h.content}`).join('\n\n----------\n\n');
     AppState.lastResponse = req.AIOutput || '';
     localStorage.setItem('favhub_last_response', AppState.lastResponse);
     document.getElementById('output-panel').classList.add('expanded');
-    document.getElementById('response-box').innerHTML = linkifyResponseText(lines);
     setRequestState('Ready');
+    this.syncOutputPanel();
     closeModal('history-modal');
   },
 
@@ -2429,10 +2460,8 @@ const UI = {
     // 長時間留まり続けるケースにも対応するため、時間ベースのトリガーも併設する（1時間ごと）。
     setInterval(purgeExpiredMedia, 60 * 60 * 1000);
 
-    if (AppState.lastResponse || (AppState.conversationHistory && AppState.conversationHistory.length > 0)) {
-      AppState.firstResponseReceived = true;
-      this.showOutputPanel();
-      this.renderResponseText(AppState.lastResponse);
+    this.syncOutputPanel();
+    if (outputMode() === 'conversation') {
       // アプリ再起動後も、このチャットで生成された画像/音声/動画/ファイルを
       // 全ターン分まとめて（累積ギャラリーとして）表示を保つ
       AppState.CurrentAIOutputMedia = AppState.lastResponseMedia || [];
@@ -2533,9 +2562,7 @@ const UI = {
         displayRandomIllustration();
         // Interaction ID有効化中のAIコンテキスト無効化表示はGemini選択時のみのため、切替のたびに再同期する
         this.syncContextPill();
-        if (AppState.RequestState === 'Ready' && !AppState.firstResponseReceived) {
-          InitialTextManager.startRotation((text) => { document.getElementById('response-box').textContent = text; });
-        }
+        if (outputMode() === 'idle') this.syncOutputPanel();
       }
     });
     // 枠外タップで閉じる
@@ -2564,16 +2591,8 @@ const UI = {
       const linkEl = e.target.closest('.chat-link');
       if (linkEl) { e.preventDefault(); e.stopPropagation(); openChatLinkUrl(linkEl.dataset.url || linkEl.href); return; }
       if (e.target.closest('#regenerate-btn')) return; // 再読み込みボタンは別処理
-      const isExpanding = !outputPanelEl.classList.contains('expanded');
       outputPanelEl.classList.toggle('expanded');
-      if (isExpanding) {
-        const lines = (AppState.conversationHistory && AppState.conversationHistory.length)
-          ? AppState.conversationHistory.map(h => `${h.role === 'user' ? '🧑 あなた' : `🤖 ${h.provider || 'AI'}`}\n${h.content}`).join('\n\n----------\n\n')
-          : (AppState.lastResponse || 'まだやり取りがありません。');
-            document.getElementById('response-box').innerHTML = linkifyResponseText(lines);
-      } else {
-        this.renderResponseText(AppState.lastResponse);
-      }
+      this.syncOutputPanel(); // idle/busy中は本文を触らず開閉のみ。conversationのときだけ全文ログ⇔直近返答を描き分ける
     });
 
     /* --- 再読み込み（直前の依頼内容で回答を再生成） --- */
@@ -3153,10 +3172,8 @@ const UI = {
     if (!apiKey) { this.populateApiKeysForm(); openModal('apikeys-modal'); return; }
     AppState.keys[service] = apiKey;
 
-    InitialTextManager.stop();
     clearImmersiveTimer(); ExitImmersiveView();
 
-    this.showOutputPanel();
     AppState.CurrentRequestContent = text;
     AppState.CurrentAIOutput = '';
     // このターンの生成物データはリセットするが、表示（response-media）はあえてクリアしない。
@@ -3164,6 +3181,7 @@ const UI = {
     AppState.CurrentAIOutputMedia = [];
     setRequestState('Processing');
     StartIllustrationProcessing();
+    this.syncOutputPanel(); // busyモード: 初期テキストのローテーションを止める
 
     const sendBtn = document.getElementById('send-btn');
     const stopBtn = document.getElementById('stop-btn');
@@ -3269,7 +3287,6 @@ const UI = {
       if (responseMedia.length) saveLastResponseMedia(responseMedia);
       displayRandomIllustration();
       await CompleteIllustrationTransition();
-      AppState.firstResponseReceived = true;
       setRequestState('Completed');
       clearImmersiveTimer();
       AppState.lastRequestResult={status:'success',body,media:responseMedia};
@@ -3338,7 +3355,6 @@ const UI = {
     saveHierarchicalContext();
     this.renderHierarchicalContextForm();
 
-    AppState.firstResponseReceived = false;
     AppState.lastResponse = ''; localStorage.removeItem('favhub_last_response');
     AppState.attachedFiles = [];
     AppState.CurrentAIOutputMedia = []; this.renderResponseMedia([]);
@@ -3348,13 +3364,12 @@ const UI = {
     const input = document.getElementById('user-input');
     input.value = ''; autosize();
     this.renderAttachmentChips();
-    this.showOutputPanel();
-    document.getElementById('response-box').textContent = '';
+    document.getElementById('output-panel').classList.remove('expanded');
     setRequestState('Ready');
+    this.syncOutputPanel({ restart: true });
     appEl.dataset.illustrationState = 'Static';
 
     displayRandomIllustration();
-    InitialTextManager.startRotation((text) => { document.getElementById('response-box').textContent = text; });
   }
 };
 
@@ -3460,9 +3475,6 @@ async function bootstrap() {
     AppState.keys[service] = (await getSecure(`apiKey.${service}`)) || '';
   }
   UI.init();
-  if (!AppState.lastResponse) {
-    InitialTextManager.startRotation((text) => { document.getElementById('response-box').textContent = text; });
-  }
 }
 
 document.addEventListener('DOMContentLoaded', () => { bootstrap().catch(err => console.error(err)); });
