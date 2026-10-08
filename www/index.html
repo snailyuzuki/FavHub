@@ -105,6 +105,15 @@ button { cursor:pointer; }
 .chat-link:active { opacity:.7; }
 /* 生成物は小さなサムネイルのグリッドで表示し、テキストの可読性を妨げないようにする。
    会話中に何度生成しても、このターン以前の生成物も含めて（チャット単位で）積み上げて表示する。 */
+  .response-tool-details { padding:0 15px 12px; font-size:12px; opacity:.82; }
+.response-tool-details[hidden] { display:none; }
+.response-tool-details details { margin:4px 0; }
+.response-tool-details summary { cursor:pointer; }
+.response-tool-details pre { max-height:220px; overflow:auto; white-space:pre-wrap; margin:6px 0 0; font:11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.response-sources { padding:0 15px 12px; font-size:12px; opacity:.82; }
+.response-sources[hidden] { display:none; }
+.response-sources h4 { margin:6px 0 4px; font-size:12px; font-weight:600; }
+.response-sources a { display:block; margin:2px 0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .response-media { padding:2px 15px 16px; margin:2px 15px 0; border-top:1px dashed rgba(255,255,255,.16); }
 .response-media[hidden] { display:none; }
 .response-media-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(76px, 1fr)); gap:8px; margin-top:10px; }
@@ -314,7 +323,7 @@ button:disabled { opacity:.38; cursor:not-allowed; }
       </button>
     </div>
     <div id="ai-output-scroll" class="ai-output-scroll">
-      <div id="response-box" class="ai-output-text"></div>
+      <div id="response-box" class="ai-output-text"></div><div id="response-sources" class="response-sources" hidden></div><div id="response-tool-details" class="response-tool-details" hidden></div>
       <div id="response-media" class="response-media" hidden></div>
     </div>
   </section>
@@ -616,8 +625,8 @@ const Camera = CapacitorPlugins.Camera;
  * ========================================================================= */
 
 /* ---------------- モデル設定 ----------------
- * ChatGPT/Geminiのエンドポイントは仕様書記載のものが404だったため、
- * 実際に疎通する従前（デモHTML）のエンドポイント形式（非ストリーミング）に戻した。
+ * OpenAIは現在の公式仕様に合わせてResponses APIを使用する。
+ * Gemini/ClaudeCodeの既存経路は変更しない。
  * ClaudeCode（Anthropic Messages API）はストリーミングのまま維持。
  * サービス名・内部スロットキー（QuickModel/DailyModel）・デフォルトモデル名は互換性のため維持し、UIではDailyモデル/Workモデルと表示する。
  * ---------------------------------------------------------------- */
@@ -627,7 +636,7 @@ const GEMINI_INTERACTIONS_ENDPOINT = 'https://generativelanguage.googleapis.com/
 const DEFAULT_MODEL_CONFIG = {
   ChatGPT: {
     provider: 'openai',
-    endpoint: 'https://api.openai.com/v1/chat/completions',
+    endpoint: 'https://api.openai.com/v1/responses',
     apiConsoleUrl: 'https://platform.openai.com/api-keys',
     models: {
       QuickModel: { name: 'gpt-5', label: 'Daily' },
@@ -815,6 +824,11 @@ function mediaExtFromMime(mimeType = '') {
   const sub = mimeType.split('/')[1] || '';
   return sub.replace(/[^a-z0-9]/gi, '').slice(0, 10) || 'bin';
 }
+function mimeFromFileName(fileName = '') {
+  const ext=String(fileName).toLowerCase().split('.').pop();
+  const known={png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',webp:'image/webp',gif:'image/gif',mp3:'audio/mpeg',wav:'audio/wav',mp4:'video/mp4',pdf:'application/pdf',txt:'text/plain',csv:'text/csv',json:'application/json',md:'text/markdown',html:'text/html',js:'text/javascript',css:'text/css',py:'text/x-python',xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'};
+  return known[ext]||'';
+}
 // テキストしか返らなかった（＝実際の画像/音声/動画データが1件も無い）にも関わらず、
 // 応答テキストにMarkdown/HTMLの画像タグや、それらしいホスト名（googleusercontent.com等）が
 // 含まれる場合、モデルが実際には生成せず「生成したふり」をしている（ハルシネーション）可能性が高い。
@@ -840,9 +854,27 @@ async function getMediaItemBlob(item) {
     return await res.blob();
   }
   if (item?.uri) {
-    const apiKey = AppState.keys.Gemini || (await getSecure('apiKey.Gemini')) || '';
-    const res = await fetch(item.uri, apiKey ? { headers: { 'x-goog-api-key': apiKey } } : {});
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    let urlObj;
+    try { urlObj=new URL(item.uri, window.location.href); } catch { throw new Error('生成物URIが不正です。'); }
+    const host=urlObj.hostname.toLowerCase();
+    let authBaseHost='';
+    try { authBaseHost=new URL(item?.authBaseUrl || '').hostname.toLowerCase(); } catch {}
+    const isOpenAIHost=host==='api.openai.com' || (!!authBaseHost && host===authBaseHost && item.authProvider==='openai');
+    const isGeminiHost=host==='generativelanguage.googleapis.com' || (!!authBaseHost && host===authBaseHost && item.authProvider==='gemini');
+    if(item.authProvider==='openai' && isOpenAIHost){
+      const apiKey = AppState.keys.ChatGPT || (await getSecure('apiKey.ChatGPT')) || '';
+      const res = await fetch(urlObj.href, apiKey ? { headers: { Authorization:`Bearer ${apiKey}` } } : {});
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.blob();
+    }
+    if(item.authProvider!=='openai' && isGeminiHost){
+      const apiKey = AppState.keys.Gemini || (await getSecure('apiKey.Gemini')) || '';
+      const res = await fetch(urlObj.href, apiKey ? { headers: { 'x-goog-api-key': apiKey } } : {});
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.blob();
+    }
+    const res=await fetch(urlObj.href);
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.blob();
   }
   return null;
@@ -863,7 +895,9 @@ function blobToBase64(blob) {
 async function downloadMediaItem(item, idx = 0) {
   if (!item) return;
 
-  const filename = `favhub_${item.kind || 'file'}_${Date.now()}_${idx}.${mediaExtFromMime(item.mimeType)}`;
+  const safeName = String(item?.fileName || '').replace(/[\\/:*?"<>|]+/g, '_').trim();
+  const fallbackExt = mediaExtFromMime(item?.mimeType || '');
+  const filename = safeName || `favhub_${item.kind || 'file'}_${Date.now()}_${idx}.${fallbackExt}`;
 
   try {
     const blob = await getMediaItemBlob(item);
@@ -920,12 +954,14 @@ function buildSessionMediaGallery(history = []) {
 }
 
 async function hydrateMediaGallery(history = []) {
+  revokeTrackedObjectUrls();
   const gallery = buildSessionMediaGallery(history);
   for (const item of gallery) {
     if (item.mediaKey && !item.dataUrl && typeof CanonicalStore !== 'undefined') {
       const stored = await CanonicalStore.getMedia(item.mediaKey);
-      if (stored?.blob) item.dataUrl = URL.createObjectURL(stored.blob);
+      if (stored?.blob) item.dataUrl = trackObjectUrl(URL.createObjectURL(stored.blob));
       else if (stored?.uri) item.uri = stored.uri;
+      else { console.warn('生成物の再取得に失敗しました:', item.mediaKey); }
     }
   }
   return gallery;
@@ -938,11 +974,12 @@ async function prepareMediaItems(chatId, turnId, media = []) {
     const item = media[i];
     const key = `${chatId}::${turnId}::${i}`;
     let blob = null;
-    try { blob = await getMediaItemBlob(item); } catch (e) { console.warn('生成物のBlob化に失敗しました:', e); }
-    const mimeType = item?.mimeType || blob?.type || '';
+    try { blob = await getMediaItemBlob(item); } catch (e) { console.warn('生成物のBlob化に失敗しました:', e); if(typeof showUserNotice==='function') showUserNotice(`生成物「${item?.fileName||item?.kind||'ファイル'}」を取得できませんでした。応答直後に再試行してください。`); }
+    const mimeType = item?.mimeType && item.mimeType!=='application/octet-stream' ? item.mimeType : ((blob?.type && blob.type!=='application/octet-stream') ? blob.type : (mimeFromFileName(item?.fileName||'') || item?.mimeType || ''));
     const uri = blob ? null : (item?.uri || null);
-    records.push({key,chatId,turnId,index:i,kind:item?.kind||'file',mimeType,uri,blob,createdAt:GetCurrentTimestamp(),expiresAt:Date.now()+72*60*60*1000});
-    refs.push({mediaKey:key,kind:item?.kind||'file',mimeType,uri});
+    const fileName = item?.fileName || '';
+    records.push({key,chatId,turnId,index:i,kind:item?.kind||'file',mimeType,uri,blob,fileName,createdAt:GetCurrentTimestamp(),expiresAt:Date.now()+72*60*60*1000});
+    refs.push({mediaKey:key,kind:item?.kind||'file',mimeType,uri,fileName});
   }
   return { refs, records };
 }
@@ -979,7 +1016,7 @@ function closeMediaLightbox() {
   if (content) content.innerHTML = '';
 }
 
-function compressImage(file, maxWidth = 800, quality = 0.7) {
+function compressImage(file, maxWidth = 800, quality = 0.7, opts = {}) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -990,7 +1027,7 @@ function compressImage(file, maxWidth = 800, quality = 0.7) {
         if (width > maxWidth) { height = Math.round((height * maxWidth) / width); width = maxWidth; }
         canvas.width = width; canvas.height = height;
         canvas.getContext('2d').drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', quality));
+        resolve(opts.keepAlpha ? canvas.toDataURL('image/png') : canvas.toDataURL('image/jpeg', quality));
       };
       img.onerror = reject;
       img.src = e.target.result;
@@ -1088,6 +1125,7 @@ async function requestTx(mode, fn) {
     }
     tx.oncomplete = () => resolve(resultValue);
     tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'));
   });
 }
 async function SaveRequestLog(entry) {
@@ -1261,6 +1299,8 @@ const AppState = {
   isRecording: false,
   recognition: null,
   abortController: null,
+  requestEpoch: 0,
+  objectUrls: [],
   immersiveTimer: null,
   requestDiagnostics: null,
   lastRequestResult: null
@@ -1279,11 +1319,11 @@ function createRequestDiagnostic({ service, model, mode, interactionIdEnabled, f
   const requestId = GenerateId('req');
   const log = { requestId, timestamp:GetCurrentTimestamp(), service, provider:service, model, mode,
     interactionIdEnabled:!!interactionIdEnabled, flexEnabled:!!flexEnabled,
-    prompt:String(prompt || '').slice(0,2000), status:'processing', phase:null,
+    prompt:String(prompt || '').slice(0,80), promptLength:String(prompt || '').length, status:'processing', phase:null,
     startedAt:performance.now(), responseAt:null, mediaDetectedAt:null, renderStartedAt:null,
     mediaRenderedAt:null, completedAt:null, sendEnabledAt:null, textReceived:false,
     mediaReceived:false, mediaCount:0, mediaRendered:false, restoreCount:0, error:null };
-  AppState.requestDiagnostics = log; persistRequestDiagnostic(log); return log;
+  AppState.requestDiagnostics = log; persistRequestDiagnostic(log); pruneRequestDiagnostics(); return log;
 }
 function markRequestDiagnostic(log, phase, patch={}) {
   if (!log) return; const now=performance.now();
@@ -1298,10 +1338,22 @@ function markRequestDiagnostic(log, phase, patch={}) {
 function failRequestDiagnostic(log, phase, error) {
   if (!log) return;
   log.status=(phase==='render'||phase==='image-load')?'render-error':(error?.name==='TimeoutError'?'timeout':'api-error');
-  log.phase=phase; log.error={name:error?.name||'Error',status:error?.status??null,message:String(error?.message||error||'Unknown error').slice(0,2000),timestamp:GetCurrentTimestamp()};
+  log.phase=phase; log.error={name:error?.name||'Error',status:error?.status??null,message:String(error?.message||error||'Unknown error').slice(0,500),timestamp:GetCurrentTimestamp()};
   persistRequestDiagnostic(log);
 }
 async function persistRequestDiagnostic(log) { try { await archTx('diagnostics', 'readwrite', store=>store.put({...log})); } catch(e) { console.warn('診断ログの保存に失敗しました。',e); } }
+const DIAGNOSTICS_MAX_ENTRIES = 200;
+// 診断ログが無制限に増えないよう、新しい順に上限件数だけ残す
+async function pruneRequestDiagnostics(max=DIAGNOSTICS_MAX_ENTRIES) {
+  try {
+    const db=await openRequestDb();
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction('diagnostics','readwrite'); const store=tx.objectStore('diagnostics'); const req=store.getAll();
+      req.onsuccess=()=>{ const rows=(req.result||[]).sort((a,b)=>String(b.timestamp).localeCompare(String(a.timestamp))); rows.slice(max).forEach(r=>{ const k=r.requestId??r.key; if(k!==undefined) store.delete(k); }); };
+      tx.oncomplete=resolve; tx.onerror=()=>reject(tx.error); tx.onabort=()=>reject(tx.error);
+    });
+  } catch(e) { console.warn('診断ログの整理に失敗しました。', e); }
+}
 async function loadRecentRequestDiagnostics(limit=30) {
   try { const db=await openRequestDb(); return await new Promise((resolve,reject)=>{ const req=db.transaction('diagnostics','readonly').objectStore('diagnostics').getAll(); req.onsuccess=()=>resolve((req.result||[]).sort((a,b)=>String(b.timestamp).localeCompare(String(a.timestamp))).slice(0,limit)); req.onerror=()=>reject(req.error); }); } catch { return []; }
 }
@@ -1357,7 +1409,11 @@ function saveGeminiInteractionId() {
     else localStorage.removeItem('favhub_gemini_interaction_id');
   } catch (e) { console.warn('Gemini Interaction IDの保存に失敗しました。', e); }
 }
-function saveIllustrations() { localStorage.setItem('favhub_illustrations_v2', JSON.stringify(AppState.illustrations)); }
+function saveIllustrations() {
+  // localStorage（約5MB）は会話履歴などと共有のため、容量超過で失敗しうる。成否を返し、呼び出し側でロールバックする。
+  try { localStorage.setItem('favhub_illustrations_v2', JSON.stringify(AppState.illustrations)); return true; }
+  catch (e) { console.warn('挿絵の保存に失敗しました。', e); return false; }
+}
 function saveInitialTexts() { localStorage.setItem('favhub_initial_texts_v2', JSON.stringify(AppState.initialTexts)); }
 function saveWaitingTexts() { localStorage.setItem('favhub_waiting_texts_v2', JSON.stringify(AppState.waitingTexts)); }
 function currentServiceIllustrations() { return (AppState.illustrations && AppState.illustrations[AppState.CurrentAIModel.service]) || []; }
@@ -1368,12 +1424,17 @@ function currentServiceInitialTexts() { const t = AppState.initialTexts?.[AppSta
 function currentServiceWaitingTexts() { const t = AppState.waitingTexts?.[AppState.CurrentAIModel.service]; return (t && t.length) ? t : DEFAULT_WAITING_TEXTS; }
 function saveHierarchicalContext() { localStorage.setItem('favhub_hierarchical_context', JSON.stringify(AppState.hierarchicalContext)); }
 function saveModelConfig() {
-  // モデル名だけを保存する（endpoint等のインフラ情報はコード側の最新値を毎回優先するため保存しない）
-  const names = {};
-  SERVICES.forEach(service => { names[service] = {}; SLOTS.forEach(slot => { names[service][slot] = AppState.modelConfig[service].models[slot].name; }); });
-  localStorage.setItem('favhub_model_names', JSON.stringify(names));
+  // スロット設定（モデル名・戦略・オプション）をまとめて保存する。旧 favhub_model_names への書き込みは廃止（読み込みのみ移行用に残す）。
+  ensureSlotConfigsInMemory();
+  saveSlotConfig();
 }
 function loadPersistedModelNames() {
+  // 旧形式（favhub_model_names）からの移行読み込み → 現行のスロット設定で上書き
+  loadLegacyModelNames();
+  loadSlotConfig();
+  ensureSlotConfigsInMemory();
+}
+function loadLegacyModelNames() {
   const names = safeJSONParse('favhub_model_names', null);
   if (!names) return;
   SERVICES.forEach(service => { SLOTS.forEach(slot => { const v = names?.[service]?.[slot]; if (v && typeof v === 'string' && v.trim()) AppState.modelConfig[service].models[slot].name = v.trim(); }); });
@@ -1482,12 +1543,28 @@ const WaitingTextManager = {
 /* ---------------- タイムアウト（従来は未実装：ユーザーが停止ボタンを押す以外に
  * ハング状態を検知する手段が無く、Provider側が無応答のまま固まると永久に「処理中」表示が
  * 残り続ける問題があったため追加） ---------------- */
-const REQUEST_TIMEOUT_MS = 90000;       // 非ストリーミング応答（Gemini/ChatGPT）の最大待機時間
+const REQUEST_TIMEOUT_MS = 180000;      // 非ストリーミング応答（通常テキスト）の最大待機時間（3分）
 const MODEL_FETCH_TIMEOUT_MS = 20000;   // モデル一覧取得・APIキー検証など軽量リクエストの最大待機時間
-const SSE_IDLE_TIMEOUT_MS = 30000;      // ストリーミング（Claude）でチャンクが届かない場合の無通信タイムアウト
+const STREAM_IDLE_TIMEOUT_NORMAL_MS = 60000;
+const STREAM_IDLE_TIMEOUT_LONG_MS = 300000;
+const SSE_IDLE_TIMEOUT_MS = STREAM_IDLE_TIMEOUT_NORMAL_MS; // 後方互換用
+const STREAMING_ENABLED = (() => {
+  try { const raw = localStorage.getItem('favhub_streaming_enabled'); return raw === null ? true : raw !== 'false'; }
+  catch { return true; }
+})();
+function resolveStreamIdleTimeout({ thinking=false, tools=false } = {}) {
+  return (thinking || tools) ? STREAM_IDLE_TIMEOUT_LONG_MS : STREAM_IDLE_TIMEOUT_NORMAL_MS;
+}
 // GeminiのFLEX推論（service_tier: flex）は待機キューに入ることがあり、Google公式は
 // クライアント側タイムアウトを600秒以上にすることを推奨しているため、専用の長めのタイムアウトを設ける。
 const GEMINI_FLEX_TIMEOUT_MS = 900000;  // 15分
+const LONG_REQUEST_TIMEOUT_MS = 900000; // 推論・画像/動画生成・ツール利用など長時間かかる非ストリーミング処理（15分）
+// 処理内容に応じてタイムアウトを選ぶ。停止ボタンはいつでも使えるため、長時間処理は長めに待つ。
+function resolveRequestTimeout({ modality='text', thinking=false, tools=false, flex=false } = {}) {
+  if (flex) return GEMINI_FLEX_TIMEOUT_MS;
+  if (thinking || tools || ['image','video','tts','transcribe'].includes(modality)) return LONG_REQUEST_TIMEOUT_MS;
+  return REQUEST_TIMEOUT_MS;
+}
 
 // ユーザー操作によるAbortController（停止ボタン）とタイムアウトの両方でfetchを中断できるようにする。
 // signal.reasonを明示的に設定することで、MapProviderError側でTimeoutErrorとAbortError（ユーザー停止）を区別できる。
@@ -1504,7 +1581,8 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = REQUEST_TIMEOUT_M
     return await fetch(url, { ...options, signal: combined.signal });
   } finally {
     clearTimeout(timer);
-    if (externalSignal) externalSignal.removeEventListener('abort', forwardAbort);
+    // ストリーミングでは、ヘッダ到達後もボディ読み取りへ中断を伝える必要があるため、リスナーを外さない
+    if (externalSignal && !options.keepAbortAfterResponse) externalSignal.removeEventListener('abort', forwardAbort);
   }
 }
 
@@ -1517,25 +1595,42 @@ function raceWithIdleTimeout(promise, ms) {
 }
 
 async function consumeSSE(response, onEvent, idleTimeoutMs = SSE_IDLE_TIMEOUT_MS) {
-  if (!response.body) { try { const json = await response.json(); onEvent(json, true); } catch {} return; }
+  if (!response.body) {
+    try { const json = await response.json(); onEvent(json, true, null); }
+    catch (err) { console.warn('SSE JSON parse failed:', err); }
+    return;
+  }
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  const processBlock = (block) => {
+    if (!block) return;
+    const lines = block.split('\n');
+    const dataLines = [];
+    let eventName = null;
+    for (const line of lines) {
+      if (line.startsWith('event:')) eventName = line.slice(6).trim() || null;
+      else if (line.startsWith('data:')) dataLines.push(line.slice(5).replace(/^ /, ''));
+    }
+    if (!dataLines.length) return;
+    const data = dataLines.join('\n').trim();
+    if (!data || data === '[DONE]') return;
+    let json;
+    try { json=JSON.parse(data); } catch(err) { console.warn('SSE JSON parse failed:', err, data.slice(0, 500)); return; }
+    onEvent(json, false, eventName);
+  };
   try {
     while (true) {
       const { done, value } = idleTimeoutMs > 0 ? await raceWithIdleTimeout(reader.read(), idleTimeoutMs) : await reader.read();
       if (done) break;
-      buffer += decoder.decode(value, { stream:true });
+      buffer += decoder.decode(value, { stream:true }).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
       const blocks = buffer.split(/\n\n/);
       buffer = blocks.pop() || '';
-      for (const block of blocks) {
-        const line = block.split('\n').find(x => x.startsWith('data:'));
-        if (!line) continue;
-        const data = line.slice(5).trim();
-        if (data === '[DONE]') continue;
-        try { onEvent(JSON.parse(data), false); } catch {}
-      }
+      for (const block of blocks) processBlock(block);
     }
+    buffer += decoder.decode();
+    buffer = buffer.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    if (buffer.trim()) processBlock(buffer);
   } catch (err) {
     try { await reader.cancel(); } catch {}
     throw err;
@@ -1547,43 +1642,122 @@ async function providerError(response, provider) {
   e.status = response.status; e.provider = provider; e.body = body;
   return e;
 }
+function extensionFromMime(mime=''){
+  const m=String(mime).toLowerCase();
+  return ({'audio/webm':'webm','audio/wav':'wav','audio/x-wav':'wav','audio/mpeg':'mp3','audio/mp3':'mp3','audio/mp4':'mp4','audio/ogg':'ogg','audio/aac':'aac','audio/flac':'flac'})[m] || 'bin';
+}
+async function dataUrlToBlob(dataUrl,mimeFallback='application/octet-stream'){
+  if(String(dataUrl||'').startsWith('data:')){
+    const [head,b64]=String(dataUrl).split(',',2);
+    const mime=head.match(/^data:([^;]+)/i)?.[1]||mimeFallback;
+    const bytes=Uint8Array.from(atob(b64||''),c=>c.charCodeAt(0));
+    return new Blob([bytes],{type:mime});
+  }
+  const res=await fetch(dataUrl);
+  return await res.blob();
+}
+function blobToDataUrl(blob){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=()=>resolve(String(reader.result||''));
+    reader.onerror=reject;
+    reader.readAsDataURL(blob);
+  });
+}
 function buildAttachmentText(attachments = []) {
   // 音声・PDF・動画添付はいずれもbase64バイナリであり、テキストとしてそのままプロンプトに
   // 埋め込むと意味を持たない上に無駄にトークンを消費するため除外する（ChatGPT/ClaudeCodeは
   // 現状これらをそのまま送る手段が無いため、単純に無視する。Gemini向けはsendGemini/
   // sendGeminiInteraction側でinline_data等として個別に送信している）。
-  return attachments.filter(a => !a.isImage && !a.isAudio && !a.isPdf && !a.isVideo).map(a => `\n\n【添付ファイル: ${a.name}】\n${a.data}`).join('');
+  return attachments.filter(a => !a.isImage && !a.isAudio && !a.isPdf && !a.isVideo && !a.isBinary).map(a => `\n\n【添付ファイル: ${a.name}】\n${a.data}`).join('');
+}
+/* 応答本文をJSONとして読む。HTMLなど非JSONの502等でもSyntaxErrorにせず、statusを付けたエラーにしてMapProviderErrorで分類できるようにする。 */
+async function readProviderJson(res, provider, fallbackMessage) {
+  let raw = '', data = null;
+  try { raw = await res.text(); data = raw ? JSON.parse(raw) : {}; } catch { data = null; }
+  if (data === null || typeof data !== 'object') {
+    const suffix = res.ok ? '：応答がJSON形式ではありません。' : `（HTTP ${res.status}）`;
+    throw Object.assign(new Error(`${fallbackMessage}${suffix}`), { status: res.ok ? 502 : res.status, provider, body: raw.slice(0, 500) });
+  }
+  return data;
 }
 // 出力モダリティはSlotConfig.outputModalityで決定する。モデル名は能力判定に使用しない。
+function makeProviderStreamError({ provider, status=502, body={}, message='' } = {}) {
+  const payload = body && typeof body === 'object' ? body : { error: body };
+  const errInfo = payload.error && typeof payload.error === 'object' ? payload.error : payload;
+  const providerStatus = errInfo?.code || errInfo?.type || errInfo?.status || null;
+  const mappedStatus = providerStatus === 'overloaded_error' ? 529 : providerStatus === 'rate_limit_error' ? 429 : providerStatus === 'gateway_timeout' ? 504 : status;
+  const msg = message || errInfo?.message || `${provider} streaming error`;
+  return Object.assign(new Error(msg), { status:mappedStatus, provider, body: JSON.stringify(payload), streamError:true, providerStatus });
+}
+function parseOpenAIResponse(data, req, url) {
+  let text=''; const media=[], sources=[], toolDetails=[];
+  for(const item of data.output||[]){
+    if(item.type==='message') for(const c of item.content||[]){
+      if(c.type==='output_text') text += (text ? '\n' : '') + (c.text||'');
+      for(const a of c.annotations||[]) {
+        if(a.type==='url_citation' && a.url) sources.push({url:a.url,title:a.title||a.url});
+        if(a.type==='container_file_citation' && (a.filename||a.file_id)) {
+          const containerId=a.container_id||item.container_id||null, fileId=a.file_id||null;
+          if(containerId&&fileId) media.push({kind:'file',mimeType:'application/octet-stream',uri:`${url.replace(/\/(?:responses|chat\/completions)\/?$/,'')}/containers/${encodeURIComponent(containerId)}/files/${encodeURIComponent(fileId)}/content`,authProvider:'openai',authBaseUrl:req.endpoint||'https://api.openai.com/v1/responses',fileName:a.filename||fileId});
+        }
+      }
+    }
+    else if(item.type==='image_generation_call' && item.result){ const fmt=item.output_format||req.providerOptions?.imageFormat||'png'; media.push({kind:'image',mimeType:`image/${fmt}`,dataUrl:`data:image/${fmt};base64,${item.result}`}); }
+    else if(item.type==='code_interpreter_call') { for(const o of (Array.isArray(item.outputs||item.output)?(item.outputs||item.output):[])){
+      if(o.type==='logs' && o.logs) toolDetails.push({title:'Code Execution logs',text:o.logs});
+      if(o.type==='image' && o.url) media.push({kind:'image',mimeType:'image/png',uri:o.url,authProvider:'openai',authBaseUrl:req.endpoint||'https://api.openai.com/v1/responses'});
+    }}
+  }
+  if(!text && typeof data.output_text==='string') text=data.output_text;
+  const uniqueSources=[]; const seen=new Set();
+  for(const a of sources){if(!a?.url||seen.has(a.url))continue;seen.add(a.url);uniqueSources.push(a);}
+  return {text,media,sources:uniqueSources,toolDetails,finishReason:data.status==='incomplete'?(data.incomplete_details?.reason||'length'):'stop',usage:data.usage||null,previousResponseId:data.id||null};
+}
+function parseGeminiResponse(data) {
+  const parts=data.candidates?.[0]?.content?.parts||[]; let text=''; const media=[];
+  for(const p of parts){
+    if(typeof p.text==='string'){text+=p.text;continue;}
+    const execCode=p.executableCode||p.executable_code;
+    if(execCode?.code){text+=`\n\n\`\`\`${(execCode.language||'python').toLowerCase()}\n${execCode.code}\n\`\`\`\n`;continue;}
+    const execResult=p.codeExecutionResult||p.code_execution_result;
+    if(execResult&&typeof execResult.output==='string'){text+=`\n実行結果:\n${execResult.output}\n`;continue;}
+    const inline=p.inlineData||p.inline_data;
+    if(inline?.data){const mimeType=inline.mimeType||inline.mime_type||'application/octet-stream';media.push({kind:mediaKindFromMime(mimeType),mimeType,dataUrl:`data:${mimeType};base64,${inline.data}`});}
+  }
+  const candidate=data.candidates?.[0]||{};
+  return {text,media,finishReason:candidate.finishReason||candidate.finish_reason||null,usage:data.usageMetadata||data.usage_metadata||null,groundingMetadata:candidate.groundingMetadata||candidate.grounding_metadata||null,urlContextMetadata:data.urlContextMetadata||data.url_context_metadata||candidate.urlContextMetadata||candidate.url_context_metadata||null};
+}
+
+function parseGeminiInteractionResponse(data) {
+  const steps=data.steps||[]; let text=''; const media=[];
+  for(const step of steps){
+    if(step.type==='model_output') for(const c of step.content||[]){
+      if(c.type==='text') text+=c.text||'';
+      else if(['image','audio','video','document'].includes(c.type)){
+        const kind=c.type==='document'?'file':c.type;
+        if(c.data) media.push({kind,mimeType:c.mime_type,dataUrl:`data:${c.mime_type};base64,${c.data}`});
+        else if(c.uri) media.push({kind,mimeType:c.mime_type,uri:c.uri});
+      }
+    }
+    if(step.type==='code_execution_call'&&step.arguments?.code) text+=`\n\n\`\`\`python\n${step.arguments.code}\n\`\`\`\n`;
+    if(step.type==='code_execution_result'&&typeof step.result==='string') text+=`\n実行結果:\n${step.result}\n`;
+  }
+  const finishReason=data.status==='incomplete'?(data.incomplete_details?.reason||data.incompleteDetails?.reason||'length'):(data.finish_reason||data.finishReason||'stop');
+  return {text,media,finishReason,usage:data.usage||data.usageMetadata||data.usage_metadata||null,interactionId:data.id||null,responseStatus:data.status||null,responseStepTypes:steps.map(s=>s.type)};
+}
+
 const ProviderService = {
-  // ChatGPT: 仕様書記載の /v1/responses ストリーミング形式が404だったため、
-  // 従前どおり /v1/chat/completions の非ストリーミング形式に戻した。
-  // Stop（AbortController）は fetch の signal でそのまま機能する。
-  async sendChatGPT({ endpoint, apiKey, model, systemPrompt, history, prompt, attachments, signal, onDelta }) {
-    const contentParts = [{ type:'text', text: prompt + buildAttachmentText(attachments) }];
-    attachments.filter(a => a.isImage).forEach(a => contentParts.push({ type:'image_url', image_url:{ url:a.data } }));
-    const messages = [];
-    if (systemPrompt) messages.push({ role:'system', content: systemPrompt });
-    history.forEach(h => messages.push({ role:h.role, content:h.content }));
-    messages.push({ role:'user', content: contentParts.length === 1 ? contentParts[0].text : contentParts });
-    const res = await fetchWithTimeout(endpoint, {
-      method:'POST', signal,
-      headers: { 'Authorization':`Bearer ${apiKey}`, 'Content-Type':'application/json' },
-      body: JSON.stringify({ model, messages })
-    }, REQUEST_TIMEOUT_MS);
-    const data = await res.json();
-    if (!res.ok || data.error) throw Object.assign(new Error(data.error?.message || 'ChatGPT API呼び出し失敗'), { status:res.status, provider:'ChatGPT', body: JSON.stringify(data) });
-    onDelta(data.choices?.[0]?.message?.content || '');
-    return { finishReason: data.choices?.[0]?.finish_reason || null, usage: data.usage || null };
-  },
+  // Legacy Chat Completions経路は既存互換のため残す。OpenAIAdapterはResponses APIを使用する。
+  // OpenAIの旧Chat Completions経路は廃止。通常経路はOpenAIAdapter.sendResponsesを使用する。
 
   // Gemini: 通常は /v1beta/models/{model}:generateContent の非ストリーミング形式。
   // transport/contextStrategyは上位のGeminiAdapterから明示的に渡される。
-  async sendGemini({ endpoint, apiKey, model, systemPrompt, history, prompt, attachments, signal, onDelta, onMedia, outputModality='text', useInteractionId, previousInteractionId, onInteractionId, providerOptions={} }) {
+  async sendGemini({ endpoint, apiKey, model, systemPrompt, history, prompt, attachments, signal, onDelta, onReplace, onMedia, outputModality='text', thinking=false, useInteractionId, previousInteractionId, onInteractionId, providerOptions={} }) {
     // TTS/文字起こし等のInteractions API専用モダリティは、Adapter側で必要時にInteractionsへ送る。
     // ユーザー側でトグルしてもらう前提とする。
-    if (useInteractionId) return ProviderService.sendGeminiInteraction({ apiKey, model, systemPrompt, prompt, attachments, previousInteractionId, signal, onDelta, onMedia, onInteractionId });
-    const url = `${endpoint}/${model}:generateContent?key=${apiKey}`;
+    if (useInteractionId) return ProviderService.sendGeminiInteraction({ apiKey, model, systemPrompt, prompt, attachments, previousInteractionId, signal, onDelta, onReplace, onMedia, onInteractionId, outputModality, thinking, providerOptions });
+    const url = `${endpoint}/${model}:generateContent`;
     const parts = [];
     let fullPrompt = prompt;
     attachments.forEach(a => {
@@ -1593,7 +1767,7 @@ const ProviderService = {
       // PDF/動画は20MB超の場合Files APIの利用が推奨されるが、このアプリは単発リクエスト
       // 方式のためinline送信のみをサポートする）。
       if (a.isImage || a.isAudio || a.isPdf || a.isVideo) parts.push({ inline_data: { mime_type:a.mimeType, data:a.data.split(',')[1] } });
-      else fullPrompt += `\n\n【添付ファイル: ${a.name}】\n${a.data}`;
+      else if (!a.isBinary) fullPrompt += `\n\n【添付ファイル: ${a.name}】\n${a.data}`;
     });
     if (fullPrompt.trim()) parts.push({ text: fullPrompt });
     const historyContents = history.map(h => ({ role: h.role === 'assistant' ? 'model' : 'user', parts:[{ text:h.content }] }));
@@ -1636,40 +1810,37 @@ const ProviderService = {
     // FLEX推論: 有効時のみservice_tierを付与する（コスト5割減の代わりに待ち時間が伸び、
     // 混雑時は503/429で弾かれうるため、タイムアウトも専用の長めの値に切り替える）
     if (providerOptions.flexInference) bodyData.service_tier = 'flex';
-    const geminiTimeout = providerOptions.flexInference ? GEMINI_FLEX_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
-    const res = await fetchWithTimeout(url, { method:'POST', signal, headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(bodyData) }, geminiTimeout);
-    const data = await res.json();
-    if (!res.ok || data.error) throw Object.assign(new Error(data.error?.message || 'Gemini API呼び出し失敗'), { status:res.status, provider:'Gemini', body: JSON.stringify(data) });
-    // 画像生成モデル（nano-banana等）はcandidates[0].content.partsにinline_data（画像等）を返すことがあるため、
-    // textだけでなく全partsを走査してテキストとメディア（画像/音声/動画）を両方拾う。
-    const respParts = data.candidates?.[0]?.content?.parts || [];
-    let text = '';
-    const media = [];
-    respParts.forEach(p => {
-      if (typeof p.text === 'string') { text += p.text; return; }
-      // Code execution: モデルが生成・実行したコードとその結果をテキストとして表示に含める
-      // （公式ドキュメント準拠：`executableCode`/`codeExecutionResult`パート。フィールド名は
-      // レスポンスの表記ゆれ（camelCase/snake_case）両方を拾う）。
-      const execCode = p.executableCode || p.executable_code;
-      if (execCode?.code) { text += `\n\n\`\`\`${(execCode.language || 'python').toLowerCase()}\n${execCode.code}\n\`\`\`\n`; return; }
-      const execResult = p.codeExecutionResult || p.code_execution_result;
-      if (execResult && typeof execResult.output === 'string') { text += `\n実行結果:\n${execResult.output}\n`; return; }
-      const inline = p.inlineData || p.inline_data;
-      if (inline?.data) {
-        const mimeType = inline.mimeType || inline.mime_type || 'application/octet-stream';
-        media.push({ kind: mediaKindFromMime(mimeType), mimeType, dataUrl:`data:${mimeType};base64,${inline.data}` });
-      }
-    });
-    onDelta(text);
-    if (media.length && onMedia) onMedia(media);
-    return { finishReason: data.candidates?.[0]?.finishReason || data.candidates?.[0]?.finish_reason || null, usage: data.usageMetadata || data.usage_metadata || null };
+    const geminiTimeout = resolveRequestTimeout({ modality:outputModality, thinking, tools:!!(providerOptions.searchGrounding||providerOptions.urlContext||providerOptions.codeExecution||providerOptions.mapsGrounding), flex:!!providerOptions.flexInference });
+    const streaming = STREAMING_ENABLED && outputModality === 'text';
+    const requestUrl = streaming ? `${endpoint}/${model}:streamGenerateContent?alt=sse` : url;
+    const res = await fetchWithTimeout(requestUrl,{method:'POST',signal,...(streaming?{keepAbortAfterResponse:true}:{}),headers:{'Content-Type':'application/json','x-goog-api-key':apiKey,...(streaming?{Accept:'text/event-stream'}:{})},body:JSON.stringify(bodyData)},streaming?REQUEST_TIMEOUT_MS:geminiTimeout);
+    if(!streaming){
+      const data=await readProviderJson(res,'Gemini','Gemini API呼び出し失敗');
+      if(!res.ok||data.error) throw Object.assign(new Error(data.error?.message||'Gemini API呼び出し失敗'),{status:res.status,provider:'Gemini',body:JSON.stringify(data)});
+      const parsed=parseGeminiResponse(data); onDelta(parsed.text); if(parsed.media.length&&onMedia)onMedia(parsed.media); return parsed;
+    }
+    if(!res.ok) throw await providerError(res,'Gemini');
+    const chunks=[]; let terminal=false;
+    await consumeSSE(res,(event)=>{
+      if(event?.error) throw makeProviderStreamError({provider:'Gemini',status:event.error.code||502,body:event.error,message:event.error.message});
+      chunks.push(event);
+      const parsed=parseGeminiResponse(event);
+      if(parsed.text) onDelta(parsed.text);
+      if(parsed.media.length&&onMedia) onMedia(parsed.media);
+      if(parsed.finishReason) terminal=true;
+    },resolveStreamIdleTimeout({thinking,tools:!!(providerOptions.searchGrounding||providerOptions.urlContext||providerOptions.codeExecution||providerOptions.mapsGrounding)}));
+    if(!terminal) throw Object.assign(new Error('ストリームが途中で終了しました'),{status:502,provider:'Gemini',streamError:true});
+    const aggregate={candidates:[{content:{parts:[]}}]}; const aggregateParts=[]; let finishReason=null,usage=null,groundingMetadata=null,urlContextMetadata=null;
+    for(const c of chunks){const p=c.candidates?.[0];if(!p)continue;for(const part of p.content?.parts||[])aggregateParts.push(part);if(p.finishReason||p.finish_reason)finishReason=p.finishReason||p.finish_reason;if(p.groundingMetadata||p.grounding_metadata)groundingMetadata=p.groundingMetadata||p.grounding_metadata;if(p.urlContextMetadata||p.url_context_metadata)urlContextMetadata=p.urlContextMetadata||p.url_context_metadata;if(c.usageMetadata||c.usage_metadata)usage=c.usageMetadata||c.usage_metadata;}
+    aggregate.candidates[0].content.parts=aggregateParts; if(finishReason)aggregate.candidates[0].finishReason=finishReason; if(groundingMetadata)aggregate.candidates[0].groundingMetadata=groundingMetadata;if(urlContextMetadata)aggregate.candidates[0].urlContextMetadata=urlContextMetadata;if(usage)aggregate.usageMetadata=usage;
+    const parsed=parseGeminiResponse(aggregate); if(parsed.text && parsed.text!==chunks.map(c=>parseGeminiResponse(c).text).join('')) onReplace?.(parsed.text); else if(!parsed.text) onReplace?.('');
+    if(parsed.media.length&&onMedia)onMedia(parsed.media);
+    return parsed;
   },
-
   // Gemini Interactions API: previous_interaction_id で会話継続をサーバー側に任せる（store:trueで保持）。
   // このモードではアプリ側からhistoryは送らない（呼び出し元がAIContextを無効化してrecentExchangesを渡さない）。
-  async sendGeminiInteraction({ apiKey, model, systemPrompt, prompt, attachments, previousInteractionId, signal, onDelta, onMedia, onInteractionId, providerOptions={} }) {
+  async sendGeminiInteraction({ apiKey, model, systemPrompt, prompt, attachments, previousInteractionId, signal, onDelta, onReplace, onMedia, onInteractionId, outputModality='text', thinking=false, providerOptions={} }) {
     const url = GEMINI_INTERACTIONS_ENDPOINT;
-    const outputModality = arguments[0]?.outputModality || 'text';
     const isTTS = outputModality === 'tts';
     const isTranscribe = outputModality === 'transcribe';
     const inputParts = [];
@@ -1683,7 +1854,7 @@ const ProviderService = {
       // それぞれtype:'document'/type:'video'でdata（base64）+mime_typeのインライン形式で送る。
       else if (a.isPdf) inputParts.push({ type:'document', data:a.data.split(',')[1], mime_type:a.mimeType });
       else if (a.isVideo) inputParts.push({ type:'video', data:a.data.split(',')[1], mime_type:a.mimeType });
-      else fullPrompt += `\n\n【添付ファイル: ${a.name}】\n${a.data}`;
+      else if (!a.isBinary) fullPrompt += `\n\n【添付ファイル: ${a.name}】\n${a.data}`;
     });
     // TTSモデルはテキストを「読み上げる台本」としてそのまま扱うため、話し方の指定は
     // 本文中に書かせず speech_metadata アノテーションに分離する（公式移行ガイド準拠）。
@@ -1759,57 +1930,44 @@ const ProviderService = {
     }
     // FLEX推論: Interactions APIでも同じservice_tierフィールドで指定できる
     if (providerOptions.flexInference) bodyData.service_tier = 'flex';
-    const geminiInteractionTimeout = providerOptions.flexInference ? GEMINI_FLEX_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
-    const res = await fetchWithTimeout(url, {
-      method:'POST', signal,
-      headers: { 'x-goog-api-key':apiKey, 'Content-Type':'application/json' },
-      body: JSON.stringify(bodyData)
-    }, geminiInteractionTimeout);
-    const data = await res.json();
-    if (!res.ok || data.error) throw Object.assign(new Error(data.error?.message || 'Gemini Interactions API呼び出し失敗'), { status:res.status, provider:'Gemini', body: JSON.stringify(data) });
-    // model_outputステップのcontentを走査し、テキストと画像/音声/動画/ドキュメントを両方拾う。
-    // data（base64）を持つものはdata URLに、uriのみのものはuriをそのまま表示に使う。
-    const modelOutputContents = (data.steps || [])
-      .filter(step => step.type === 'model_output')
-      .flatMap(step => step.content || []);
-    let text = '';
-    const media = [];
-    modelOutputContents.forEach(c => {
-      if (c.type === 'text') { text += c.text || ''; return; }
-      if (['image', 'audio', 'video', 'document'].includes(c.type)) {
-        const kind = c.type === 'document' ? 'file' : c.type;
-        if (c.data) media.push({ kind, mimeType: c.mime_type, dataUrl:`data:${c.mime_type};base64,${c.data}` });
-        else if (c.uri) media.push({ kind, mimeType: c.mime_type, uri: c.uri });
-      }
+    const geminiInteractionTimeout = resolveRequestTimeout({ modality:outputModality, tools:!!(providerOptions.searchGrounding||providerOptions.urlContext||providerOptions.codeExecution||providerOptions.mapsGrounding), flex:!!providerOptions.flexInference });
+    const streaming = STREAMING_ENABLED && outputModality === 'text';
+    if(streaming) bodyData.stream=true;
+    const requestUrl = streaming ? `${url}?alt=sse` : url;
+    const res = await fetchWithTimeout(requestUrl,{method:'POST',signal,...(streaming?{keepAbortAfterResponse:true}:{}),headers:{'x-goog-api-key':apiKey,'Content-Type':'application/json',...(streaming?{Accept:'text/event-stream'}:{})},body:JSON.stringify(bodyData)},streaming?REQUEST_TIMEOUT_MS:geminiInteractionTimeout);
+    if(!streaming){
+      const data=await readProviderJson(res,'Gemini','Gemini Interactions API呼び出し失敗');
+      if(!res.ok||data.error) throw Object.assign(new Error(data.error?.message||'Gemini Interactions API呼び出し失敗'),{status:res.status,provider:'Gemini',body:JSON.stringify(data)});
+      const parsed=parseGeminiInteractionResponse(data); if(parsed.text)onDelta(parsed.text); if(parsed.media.length&&onMedia)onMedia(parsed.media); if(data.id&&onInteractionId)onInteractionId(data.id); return parsed;
+    }
+    if(!res.ok) throw await providerError(res,'Gemini');
+    const stepsByIndex=new Map(); let completed=null, terminal=false, interactionId=null, streamText='';
+    await consumeSSE(res,(event,eventFull,eventName)=>{
+      if(event?.error||eventName==='error'||event?.event_type==='error') throw makeProviderStreamError({provider:'Gemini',status:event?.error?.code||502,body:event?.error||event,message:event?.error?.message||event?.message||'Gemini Interactions API stream error'});
+      const type=event?.event_type||event?.type||eventName;
+      if(type==='interaction.created'){interactionId=event.interaction?.id||event.id||interactionId;if(interactionId&&onInteractionId)onInteractionId(interactionId);return;}
+      if(type==='step.start'){const i=Number(event.index);if(!Number.isInteger(i))return;const step=event.step||{};stepsByIndex.set(i,{...step,type:step.type||'unknown',content:[],arguments:step.arguments||{}});return;}
+      if(type==='step.delta'){const i=Number(event.index);if(!Number.isInteger(i))return;let step=stepsByIndex.get(i);if(!step){step={type:'unknown',content:[],arguments:{}};stepsByIndex.set(i,step);}const d=event.delta||{};
+        if(d.type==='text'){if(step.type==='model_output'){const c=step.content.find(x=>x.type==='text');if(c)c.text+=(d.text||'');else step.content.push({type:'text',text:d.text||''});streamText+=d.text||'';onDelta(d.text||'');}}
+        else if(d.type==='image'){if(step.type==='model_output')step.content.push({type:'image',mime_type:d.mime_type,data:d.data,uri:d.uri});if(d.data&&onMedia)onMedia([{kind:'image',mimeType:d.mime_type,dataUrl:`data:${d.mime_type};base64,${d.data}`}]);}
+        else if(d.type==='arguments_delta'){step.argumentsRaw=(step.argumentsRaw||'')+(d.arguments||'');}
+        else if(d.type==='code_execution_call'){step.type='code_execution_call';const a=d.arguments||{};const prevCode=typeof step.arguments?.code==='string'?step.arguments.code:'';step.arguments={...(step.arguments||{}),...a};if(typeof a.code==='string')step.arguments.code=prevCode+a.code;}
+        else if(d.type==='code_execution_result'){step.type='code_execution_result';if(d.result!==undefined)step.result=(step.result||'')+String(d.result);}
+        return;}
+      if(type==='step.stop') return;
+      if(type==='interaction.completed'){completed=event.interaction||event;terminal=true;if(completed.id)interactionId=completed.id;}
+    },resolveStreamIdleTimeout({thinking,tools:!!(providerOptions.searchGrounding||providerOptions.urlContext||providerOptions.codeExecution||providerOptions.mapsGrounding)}));
+    if(!terminal||!completed) throw Object.assign(new Error('ストリームが途中で終了しました'),{status:502,provider:'Gemini',streamError:true});
+    const steps=Array.from(stepsByIndex.entries()).sort((a,b)=>a[0]-b[0]).map(([,step])=>{
+      if(step.argumentsRaw){try{step.arguments=JSON.parse(step.argumentsRaw);}catch{step.arguments=step.argumentsRaw;}}
+      return step;
     });
-    // Code execution: code_execution_call（生成コード）/code_execution_resultステップを
-    // 順序通りにテキストへ差し込む（公式ドキュメント準拠のステップ形式）。
-    (data.steps || []).forEach(step => {
-      if (step.type === 'code_execution_call' && step.arguments?.code) {
-        text += `\n\n\`\`\`python\n${step.arguments.code}\n\`\`\`\n`;
-      } else if (step.type === 'code_execution_result' && typeof step.result === 'string') {
-        text += `\n実行結果:\n${step.result}\n`;
-      }
-    });
-    onDelta(text);
-    if (media.length && onMedia) onMedia(media);
-    if (data.id && onInteractionId) onInteractionId(data.id);
-    const finishReason = data.status === 'incomplete'
-      ? (data.incomplete_details?.reason || data.incompleteDetails?.reason || 'length')
-      : (data.finish_reason || data.finishReason || 'stop');
-    return {
-      finishReason,
-      usage: data.usage || data.usageMetadata || data.usage_metadata || null,
-      responseStepTypes: (data.steps || []).map(step => step.type),
-      responseModelOutputContentTypes: modelOutputContents.map(c => c?.type).filter(Boolean),
-      responseHasOutputVideo: modelOutputContents.some(c => c?.type === 'video'),
-      responseHasVideoData: modelOutputContents.some(c => c?.type === 'video' && !!c?.data),
-      responseHasVideoUri: modelOutputContents.some(c => c?.type === 'video' && !!c?.uri),
-      responseStatus: data.status || null,
-      interactionId: data.id || null
-    };
+    const aggregate={...completed,steps};
+    const parsed=parseGeminiInteractionResponse(aggregate);
+    if(parsed.text!==streamText && onReplace) onReplace(parsed.text);
+    if(parsed.media.length&&onMedia)onMedia(parsed.media); if(interactionId&&onInteractionId)onInteractionId(interactionId);
+    return {...parsed,interactionId:interactionId||parsed.interactionId,usage:completed.usage||null,responseStatus:completed.status||null};
   },
-
   async sendClaudeCode({ endpoint, apiKey, model, systemPrompt, history, prompt, attachments, useThinking, maxOutputTokens, thinkingBudgetTokens, signal, onDelta }) {
     const contentParts = [];
     attachments.forEach(a => { if (a.isImage) contentParts.push({ type:'image', source:{ type:'base64', media_type:a.mimeType, data:a.data.split(',')[1] } }); });
@@ -1821,34 +1979,44 @@ const ProviderService = {
     let finishReason = null;
     let usage = null;
     const res = await fetchWithTimeout(endpoint, {
-      method:'POST', signal,
+      method:'POST', signal, keepAbortAfterResponse:true,
       headers: { 'x-api-key':apiKey, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true', 'Content-Type':'application/json', 'Accept':'text/event-stream' },
       body: JSON.stringify(payload)
     }, REQUEST_TIMEOUT_MS);
     if (!res.ok) throw await providerError(res, 'ClaudeCode');
-    await consumeSSE(res, (event, isFullJson) => {
+    let terminal=false;
+    await consumeSSE(res, (event, isFullJson, eventName) => {
+      if(eventName==='error' || event?.type==='error') throw makeProviderStreamError({provider:'ClaudeCode',status:502,body:event,error:event?.error?.message||event?.message||'Claude stream error'});
       if (event?.type === 'message_start' && event?.message?.usage) usage = event.message.usage;
-      if (event?.type === 'message_delta') {
-        finishReason = event?.delta?.stop_reason || event?.delta?.stopReason || finishReason;
-        if (event?.usage) usage = { ...(usage || {}), ...event.usage };
-      }
-      if (isFullJson) { const text = (event?.content || []).filter(c => c.type === 'text').map(c => c.text).join(''); if (text) onDelta(text); finishReason = event?.stop_reason || event?.stopReason || finishReason; return; }
-      if (event?.type === 'content_block_delta' && event?.delta?.type === 'text_delta' && event.delta.text) onDelta(event.delta.text);
-    });
+      if (event?.type === 'message_delta') { finishReason = event?.delta?.stop_reason || event?.delta?.stopReason || finishReason; if(event?.usage)usage={...(usage||{}),...event.usage}; }
+      if(event?.type==='message_stop'){terminal=true;return;}
+      if (isFullJson) { const text=(event?.content||[]).filter(c=>c.type==='text').map(c=>c.text).join(''); if(text)onDelta(text); finishReason=event?.stop_reason||event?.stopReason||finishReason; terminal=true; return; }
+      if(event?.type==='content_block_delta'&&event?.delta?.type==='text_delta'&&event.delta.text)onDelta(event.delta.text);
+    },resolveStreamIdleTimeout({thinking:!!useThinking,tools:false}));
+    if(!terminal) throw Object.assign(new Error('ストリームが途中で終了しました'),{status:502,provider:'ClaudeCode',streamError:true});
     return { finishReason, usage };
   },
 
   async fetchOpenAIModels(key = '') {
     const res = await fetchWithTimeout('https://api.openai.com/v1/models', { headers:{ 'Authorization':`Bearer ${key}` } }, MODEL_FETCH_TIMEOUT_MS);
-    const data = await res.json();
+    const data = await readProviderJson(res, 'ChatGPT', 'OpenAIモデル一覧の取得に失敗しました');
     if (!res.ok || data.error) throw new Error(data.error?.message || 'OpenAI APIキーが無効です。');
-    return data.data.map(m => m.id);
+    // /v1/models は未ソートのため、作成日の新しい順に並べて返す
+    return (data.data || []).slice().sort((a, b) => (b.created || 0) - (a.created || 0)).map(m => m.id);
   },
   async fetchGeminiModels(key = '') {
-    const res = await fetchWithTimeout(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`, {}, MODEL_FETCH_TIMEOUT_MS);
-    const data = await res.json();
-    if (!res.ok || data.error) throw new Error(data.error?.message || 'Gemini APIキーが無効です。');
-    return (data.models || []).filter(m => m.supportedGenerationMethods?.includes('generateContent')).map(m => m.name.replace('models/', ''));
+    const names = [];
+    let pageToken = '';
+    for (let page = 0; page < 20; page++) {
+      const u = `https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`;
+      const res = await fetchWithTimeout(u, { headers:{ 'x-goog-api-key':key } }, MODEL_FETCH_TIMEOUT_MS);
+      const data = await readProviderJson(res, 'Gemini', 'Geminiモデル一覧の取得に失敗しました');
+      if (!res.ok || data.error) throw new Error(data.error?.message || 'Gemini APIキーが無効です。');
+      (data.models || []).filter(m => m.supportedGenerationMethods?.includes('generateContent')).forEach(m => names.push(m.name.replace('models/', '')));
+      pageToken = data.nextPageToken || '';
+      if (!pageToken) break;
+    }
+    return names;
   },
   async fetchClaudeModels(key = '') {
     const res = await fetchWithTimeout('https://api.anthropic.com/v1/models', { headers:{ 'x-api-key':key, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true' } }, MODEL_FETCH_TIMEOUT_MS);
@@ -1860,6 +2028,12 @@ const ProviderService = {
 
 // 仕様書 ai-client.js の MapProviderError 準拠
 // 優先度: ①タイムアウト検知 ②429のquota/レート制限の区別 ③ネットワーク/CORS障害の判別 ④モデル404の専用メッセージ
+const CONTEXT_OVERFLOW_PATTERN = /context_length_exceeded|maximum context length|context window|context length|too many tokens|prompt is too long|request too large|input token count|exceeds the maximum number of (input )?tokens|input is too long|reduce the length of the messages/i;
+function isContextOverflowText(text) { return CONTEXT_OVERFLOW_PATTERN.test(String(text || '')); }
+// 各Providerの打ち切り表現（OpenAI: length / max_output_tokens、Gemini: MAX_TOKENS、Claude: max_tokens）を統一して判定する
+function isTruncatedFinishReason(reason) {
+  return /^(length|max_tokens|max_tokens_reached|max_output_tokens|max_output_tokens_reached|content_filter)$/.test(String(reason || '').toLowerCase());
+}
 function MapProviderError(error) {
   const status = error?.status;
   const bodyStr = error?.body || '';
@@ -1867,8 +2041,19 @@ function MapProviderError(error) {
 
   // ①タイムアウト（fetchWithTimeout / consumeSSEの無通信タイムアウトが投げるDOMException）。
   // ユーザーが停止ボタンを押した場合はname==='AbortError'になり、こちらとは区別される。
-  if (error?.name === 'TimeoutError') return { code:'TIMEOUT', message:'応答がありませんでした（タイムアウト）。通信状況を確認するか、しばらくしてから再試行してください。' };
+  if (error?.name === 'TimeoutError') return { code:'TIMEOUT', message:'応答がありませんでした（タイムアウト）。通信状況を確認するか、しばらくしてから再試行してください。\n※ 送信済みのリクエストはサーバー側で処理が続き、課金される場合があります。' };
   if (error?.name === 'AbortError') return { code:'ABORTED', message:'処理を停止しました。' };
+
+  if (error?.streamError) {
+    const codeText = `${bodyStr} ${msgStr}`;
+    if (error?.providerStatus === 'overloaded_error' || /overloaded_error/i.test(codeText)) return { code:'PROVIDER_FAILURE', status:529, message:'Providerが混雑しています（overloaded_error）。しばらくしてから再試行してください。' };
+    if (error?.providerStatus === 'rate_limit_error' || /rate_limit_error/i.test(codeText)) return { code:'RATE_LIMIT', status:429, message:'利用制限（レート制限）に達しました。少し待ってから再試行してください。' };
+    if (error?.providerStatus === 'gateway_timeout' || /gateway_timeout/i.test(codeText)) return { code:'PROVIDER_FAILURE', status:504, message:'Providerへの接続がタイムアウトしました。しばらくしてから再試行してください。' };
+    // 429/503/400など意味のあるstatusを持つ途中エラー（Geminiのエラーチャンク等）は、通常のstatus判定へ回す
+    if (!(Number.isInteger(status) && status >= 400 && status !== 502)) {
+      return { code:'PROVIDER_FAILURE', status:502, message: msgStr ? `ストリーミング中にProviderエラーが発生しました。（${msgStr}）` : 'ストリーミング中にProviderエラーが発生しました。' };
+    }
+  }
 
   if (status === 401) return { code:'AUTH_ERROR', message:'APIキーが無効です。APIキーを確認してください。' };
   if (status === 403) return { code:'AUTH_ERROR', message:'APIキーへのアクセスが拒否されました。権限設定やIP制限を確認してください。' };
@@ -1881,15 +2066,23 @@ function MapProviderError(error) {
     return { code:'RATE_LIMIT', message:'利用制限（レート制限）に達しました。少し待ってから再試行してください。' };
   }
 
-  if (status === 400 && /context|token/i.test(bodyStr)) return { code:'CONTEXT_OVERFLOW', message:'コンテキスト（会話履歴・添付内容）が大きすぎます。履歴を整理するか、AIコンテキストの設定を見直してください。' };
+  if (status === 400 && isContextOverflowText(bodyStr)) return { code:'CONTEXT_OVERFLOW', message:'コンテキスト（会話履歴・添付内容）が大きすぎます。履歴を整理するか、AIコンテキストの設定を見直してください。' };
   // ③-b Geminiの400は、グラウンディング（Google Search）が対象外・課金必須のモデルに対して
   // 有効化されている場合にも発生しうる。原因の切り分けは本文だけでは確実にできないため、
   // 断定はせず「可能性」を示すヒントとして併記する（グラウンディングOFFで解決するケースが多いため）。
+  if (status === 400 && error?.provider === 'ChatGPT' && (error?.imageModelConfigError || /image_generation|image generation|gpt-image/i.test(`${bodyStr} ${msgStr}`))) {
+    const base = msgStr ? `リクエストが拒否されました。（${msgStr}）` : 'リクエストが拒否されました。（HTTP 400）';
+    return { code:'BAD_REQUEST_OPENAI_IMAGE', message:`${base}\n画像生成ツールを有効にしている場合は、画像ツール対応モデルを選択してください。出力形式=画像の場合はGPT Imageモデル（gpt-image-*）を指定してください。` };
+  }
   if (status === 400 && error?.provider === 'Gemini' && AppState.GeminiSearchGroundingEnabled) {
     const base = msgStr ? `リクエストが拒否されました。（${msgStr}）` : 'リクエストが拒否されました。（HTTP 400）';
     return { code:'BAD_REQUEST_GEMINI_GROUNDING', message: `${base}\nグラウンディングが対象外もしくは課金が必要なモデルの可能性があります。チャット設定で停止させると動作する場合があります。` };
   }
   // ④モデル未検出（モデル名の誤り・APIバージョン不一致など）
+  if (error?.videoApiUnavailable || status === 410) {
+    const providerLabel=error?.provider || 'API';
+    return { code:'UNSUPPORTED', message: msgStr || `${providerLabel}ではこのAPI機能は現在利用できません。` };
+  }
   if (status === 404) return { code:'MODEL_NOT_FOUND', message: msgStr ? `指定されたモデルが見つかりません。モデル名の設定を確認してください。（${msgStr}）` : '指定されたモデルが見つかりません。モデル名の設定を確認してください。' };
   // 400番台はリクエスト自体の問題であることが多いため、Provider側からの実際のメッセージをそのまま出す
   if (status >= 400 && status < 500) return { code:'BAD_REQUEST', message: msgStr ? `リクエストが拒否されました。（${msgStr}）` : `リクエストが拒否されました。（HTTP ${status}）` };
@@ -2091,10 +2284,37 @@ function updateImmersiveCompleteVisibility() {
     immersiveCompleteBtn.classList.remove('pop');
   }
 }
+/* 実行中リクエストを中断し、完了時の書き込みが別チャットへ混入しないよう世代番号を進める */
+function cancelInflightRequest() {
+  AppState.requestEpoch = (AppState.requestEpoch || 0) + 1;
+  try { if (typeof UI !== 'undefined') UI.cancelStreamRender(); } catch {}
+  const c = AppState.abortController; AppState.abortController = null;
+  if (c) { try { c.abort(); } catch {} }
+}
+/* 生成物表示用に作ったObject URLを追跡し、再描画時にまとめて解放する */
+function trackObjectUrl(url) { if (url) (AppState.objectUrls || (AppState.objectUrls = [])).push(url); return url; }
+function revokeTrackedObjectUrls() {
+  const list = AppState.objectUrls || []; AppState.objectUrls = [];
+  list.forEach(u => { try { URL.revokeObjectURL(u); } catch {} });
+}
 function setRequestState(value) {
   AppState.RequestState = value;
   appEl.dataset.requestState = value;
   if (appEl.classList.contains('immersive')) updateImmersiveCompleteVisibility();
+}
+function showUserNotice(message){
+  const text=String(message||'').trim();
+  if(!text)return;
+  try{
+    const box=document.getElementById('response-tool-details');
+    if(box){
+      const el=document.createElement('details'); el.open=true;
+      const summary=document.createElement('summary'); summary.textContent='注意'; el.appendChild(summary);
+      const pre=document.createElement('pre'); pre.textContent=text; el.appendChild(pre);
+      box.hidden=false; box.appendChild(el); return;
+    }
+  }catch{}
+  console.warn(text);
 }
 
 /* ---------------- 没入表示（仕様書 EnterImmersiveView/ExitImmersiveView 準拠） ---------------- */
@@ -2226,7 +2446,75 @@ const UI = {
   removeAttachment(idx = 0) { AppState.attachedFiles.splice(idx, 1); this.renderAttachmentChips(); },
 
   renderResponseText(text = '') {
-    document.getElementById('response-box').innerHTML = linkifyResponseText(text);
+    const box=document.getElementById('response-box'); if(box) box.innerHTML=linkifyResponseText(text);
+  },
+  _streamRender:{text:'',raf:0,active:false,epoch:0},
+  _isStreamNearBottom() {
+    const scroll=document.getElementById('ai-output-scroll');
+    return !scroll || scroll.scrollHeight-scroll.scrollTop-scroll.clientHeight<=40;
+  },
+  scheduleStreamRender(text='') {
+    const st=this._streamRender; st.text=String(text); st.active=true; st.epoch=AppState.requestEpoch||0;
+    if(st.raf) return;
+    st.raf=requestAnimationFrame(()=>{
+      st.raf=0;
+      // 「＋」や履歴復元で世代が変わっていたら、古い本文を描画しない
+      if(!st.active||st.epoch!==(AppState.requestEpoch||0)){st.active=false;return;}
+      st.active=false;
+      const near=this._isStreamNearBottom(); // DOM更新前に末尾付近かを判定する
+      this.renderResponseText(StreamFilter.visible(st.text,{streaming:true}));
+      this.followStreamScroll(near);
+    });
+  },
+  flushStreamRender(text=this._streamRender.text) {
+    const st=this._streamRender;
+    if(st.raf){cancelAnimationFrame(st.raf);st.raf=0;}
+    st.text=String(text);st.active=false;
+    const near=this._isStreamNearBottom();
+    this.renderResponseText(StreamFilter.visible(st.text,{streaming:true}));
+    this.followStreamScroll(near);
+  },
+  cancelStreamRender() {
+    const st=this._streamRender;
+    if(st.raf){cancelAnimationFrame(st.raf);st.raf=0;}
+    st.active=false; st.text='';
+  },
+  followStreamScroll(wasNearBottom=true) {
+    const scroll=document.getElementById('ai-output-scroll');
+    if(scroll && wasNearBottom) scroll.scrollTop=scroll.scrollHeight;
+  },
+  renderResponseSources(sources = []) {
+    const box=document.getElementById('response-sources');
+    if(!box)return;
+    box.innerHTML='';
+    const list=Array.isArray(sources)?sources:[];
+    if(!list.length){box.hidden=true;return;}
+    const title=document.createElement('h4'); title.textContent='Sources'; box.appendChild(title); const note=document.createElement('div'); note.className='config-help'; note.textContent='表示専用。会話履歴には保存しません。'; box.appendChild(note);
+    let validCount=0;
+    for(const src of list){
+      if(!src?.url)continue;
+      const rawUrl=String(src.url||'').trim();
+      if(!/^https?:\/\//i.test(rawUrl)) continue;
+      let u; try { u=new URL(rawUrl); } catch { continue; }
+      if(!['http:','https:'].includes(u.protocol)) continue;
+      const a=document.createElement('a'); a.href=u.href; a.textContent=src.title||src.url; a.target='_blank'; a.rel='noopener noreferrer';
+      box.appendChild(a); validCount++;
+    }
+    box.hidden=validCount===0;
+  },
+  renderResponseToolDetails(details = []) {
+    const box=document.getElementById('response-tool-details');
+    if(!box)return;
+    box.innerHTML='';
+    const list=Array.isArray(details)?details:[];
+    if(!list.length){box.hidden=true;return;}
+    const note=document.createElement('div'); note.className='config-help'; note.textContent='表示専用。会話履歴には保存しません。'; box.appendChild(note);
+    for(const d of list){
+      const el=document.createElement('details');
+      const summary=document.createElement('summary'); summary.textContent=d.title||'Tool details'; el.appendChild(summary);
+      const pre=document.createElement('pre'); pre.textContent=String(d.text||''); el.appendChild(pre); box.appendChild(el);
+    }
+    box.hidden=false;
   },
 
   // Gemini等がテキスト以外（画像/音声/動画/ドキュメント）を返した場合の表示。
@@ -2342,6 +2630,7 @@ const UI = {
   },
   async restoreRequest(id) {
     const req = await LoadRequestLog(id); if (!req) return;
+    cancelInflightRequest(); WaitingTextManager.stop(); clearImmersiveTimer(); ExitImmersiveView();
     // RequestLogは一覧表示用のサマリー。復元時の会話正本はCanonicalStoreとし、旧ログだけhistoryをフォールバック利用する。
     AppState.CurrentChatId = req.RequestId || id;
     saveCurrentChatId();
@@ -2590,6 +2879,8 @@ const UI = {
       const linkEl = e.target.closest('.chat-link');
       if (linkEl) { e.preventDefault(); e.stopPropagation(); openChatLinkUrl(linkEl.dataset.url || linkEl.href); return; }
       if (e.target.closest('#regenerate-btn')) return; // 再読み込みボタンは別処理
+      // サムネイル・ダウンロード・出典リンク・詳細(<summary>)の操作では、パネルの開閉をトグルしない
+      if (e.target.closest('.response-media-item, .response-sources a, #response-tool-details summary, #response-tool-details details')) return;
       outputPanelEl.classList.toggle('expanded');
       this.syncOutputPanel(); // idle/busy中は本文を触らず開閉のみ。conversationのときだけ全文ログ⇔直近返答を描き分ける
     });
@@ -2602,21 +2893,50 @@ const UI = {
       const text = AppState.CurrentRequestContent || [...AppState.conversationHistory].reverse().find(h => h.role === 'user')?.content || '';
       if (!text) return;
       outputPanelEl.classList.remove('expanded');
-      const history = AppState.conversationHistory || [];
-      const lastAssistant = history.length && history[history.length - 1]?.role === 'assistant' ? history.length - 1 : -1;
-      const lastUser = lastAssistant > 0 && history[lastAssistant - 1]?.role === 'user' ? lastAssistant - 1 : -1;
-      if (lastAssistant >= 0) history.splice(lastAssistant, 1);
-      if (lastUser >= 0) history.splice(lastUser, 1);
-      AppState.conversationHistory = history;
-      await ContextManager.appendConversation(AppState.CurrentChatId, history);
-      saveConversationHistory();
+      const chatId = AppState.CurrentChatId;
       const service = AppState.CurrentAIModel.service, slot = AppState.CurrentAIModel.slot;
       const adapterId = AppState.modelConfig[service]?.provider;
-      if (adapterId && typeof ProviderStateManager !== 'undefined') await ProviderStateManager.clear(AppState.CurrentChatId, slotIdFor(service, slot));
+      const slotId = slotIdFor(service, slot);
+      // 失敗時に元の回答へ戻せるよう、破壊的操作の前に退避する
+      const backupHistory = cloneJson(AppState.conversationHistory || []);
+      let backupState = null;
+      try { backupState = adapterId && typeof ProviderStateManager !== 'undefined' ? await ProviderStateManager.get(chatId, slotId) : null; } catch {}
+      const backupInteractionId = AppState.GeminiInteractionId;
+      const history = cloneJson(backupHistory);
+      const lastAssistant = history.length && history[history.length - 1]?.role === 'assistant' ? history.length - 1 : -1;
+      const lastUser = lastAssistant > 0 && history[lastAssistant - 1]?.role === 'user' ? lastAssistant - 1 : -1;
+      const removedUser = lastUser >= 0 ? history[lastUser] : null;
+      if (lastAssistant >= 0) history.splice(lastAssistant, 1);
+      if (lastUser >= 0) history.splice(lastUser, 1);
+      // 添付ファイル：メモリに残っている直前の添付があれば再送する。無い場合（再起動後など）は通知する。
+      if (!AppState.attachedFiles.length && AppState.lastRequestAttachments?.length) {
+        AppState.attachedFiles = cloneJson(AppState.lastRequestAttachments); this.renderAttachmentChips();
+      } else if (!AppState.attachedFiles.length && removedUser?.attachmentNames?.length) {
+        showUserNotice(`元の依頼の添付ファイル（${removedUser.attachmentNames.join('、')}）は再送されません。必要なら添付し直してください。`);
+      }
+      AppState.conversationHistory = history;
+      await ContextManager.appendConversation(chatId, history);
+      saveConversationHistory();
+      if (adapterId && typeof ProviderStateManager !== 'undefined') await ProviderStateManager.clear(chatId, slotId);
       AppState.GeminiInteractionId = null; saveGeminiInteractionId();
       AppState.CurrentAIOutput = ''; AppState.CurrentAIOutputMedia = []; AppState.lastRequestResult = null;
       document.getElementById('user-input').value = text; autosize();
       await this.handleSend();
+      // 新しい回答が保存されなかった場合（API失敗・保存失敗・別チャットへ移動した中断）は、元の1往復とProvider Stateを戻す。
+      let storedLen = 0;
+      try { storedLen = (await CanonicalStore.getConversation(chatId))?.messages?.length || 0; } catch {}
+      if (storedLen <= history.length && lastAssistant >= 0) {
+        const errMsg = AppState.CurrentChatId === chatId ? (AppState.lastRequestResult?.error?.message || '') : '';
+        try {
+          await ContextManager.appendConversation(chatId, backupHistory);
+          if (backupState) await ProviderStateManager.save(backupState);
+        } catch (err) { console.warn('再生成失敗後の復元に失敗しました。', err); }
+        if (AppState.CurrentChatId === chatId) {
+          AppState.GeminiInteractionId = backupInteractionId; saveGeminiInteractionId();
+          await this.restoreRequest(chatId);
+          showUserNotice(`再生成に失敗したため、元の回答を残しました。${errMsg ? `（${errMsg}）` : ''}`);
+        }
+      }
     });
 
     /* --- 画像ギャラリー（サービスごと） --- */
@@ -2629,7 +2949,11 @@ const UI = {
           try {
             const compressed = await compressImage(file);
             AppState.illustrations[service].push(compressed);
-            saveIllustrations();
+            if (!saveIllustrations()) {
+              AppState.illustrations[service].pop();
+              alert('保存容量（localStorage 約5MB）が不足しているため、挿絵を追加できませんでした。不要な挿絵を削除してからお試しください。');
+              return;
+            }
             this.renderGallery();
             if (service === AppState.CurrentAIModel.service) displayRandomIllustration();
           } catch { alert('画像の追加・圧縮に失敗しました。'); }
@@ -2666,41 +2990,61 @@ const UI = {
       reader.onerror = reject;
       reader.readAsDataURL(file);
     });
+    const TEXT_ATTACH_MAX_BYTES = 1024 * 1024;        // プロンプトへ埋め込むテキストは1MBまで
+    const BINARY_ATTACH_MAX_BYTES = 25 * 1024 * 1024; // その他のバイナリは25MBまで（Code Execution用）
+    const TEXT_MIME_RE = /^(text\/|application\/(json|xml|x-yaml|yaml|javascript|x-javascript|x-sh|x-python|sql|toml))/i;
+    const TEXT_EXT_RE = /\.(txt|md|markdown|csv|tsv|json|jsonl|xml|html?|css|js|mjs|ts|tsx|jsx|py|rb|go|rs|java|c|h|cpp|hpp|cs|php|sh|bash|zsh|sql|ya?ml|toml|ini|cfg|conf|log|env|tex|rst|swift|kt)$/i;
     const handleAttachedFile = async (file) => {
       if (!file) return;
-      const isImage = file.type.startsWith('image/');
-      const isAudio = file.type.startsWith('audio/');
-      // PDF/動画は拡張子だけでなくMIMEでも判定する（"ファイル"経由でMIMEが空の場合は拡張子で補完）。
-      const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
-      const isVideo = file.type.startsWith('video/');
-      if (isImage) {
-        const compressed = await compressImage(file, 1024, 0.8);
-        AppState.attachedFiles.push({ name:file.name, mimeType:file.type || 'image/jpeg', isImage:true, isAudio:false, isPdf:false, isVideo:false, data:compressed });
-      } else if (isAudio) {
-        // 公式サポート形式（wav/mp3/aiff/aac/ogg/flac/mpeg/m4a/l16/opus/alaw/mulaw/webm）以外は
-        // Gemini側で拒否される可能性があるため、送信前に軽く警告する。
-        const supported = /^audio\/(wav|x-wav|mpeg|mp3|aiff|x-aiff|aac|ogg|flac|x-flac|m4a|x-m4a|l16|opus|alaw|mulaw|webm)/i.test(file.type);
-        if (!supported) alert(`「${file.name}」の形式（${file.type || '不明'}）はGemini 3.5 Transcribeの対応形式と異なる可能性があります。送信は試行されますが、失敗する場合はWAV/MP3等に変換してください。`);
-        const dataUrl = await readFileAsDataURL(file);
-        AppState.attachedFiles.push({ name:file.name, mimeType:file.type || 'audio/mpeg', isImage:false, isAudio:true, isPdf:false, isVideo:false, data:dataUrl });
-      } else if (isPdf) {
-        // PDF/Document understanding（公式: ai.google.dev/gemini-api/docs/document-processing）。
-        // inline送信は合計リクエスト20MBまでが目安（超える場合は公式もFiles APIを推奨するが、
-        // このアプリは単発リクエスト方式のため未対応。ここでは軽く警告のみ行う）。
-        if (file.size > 20 * 1024 * 1024) alert(`「${file.name}」は20MBを超えています。Geminiへの送信（インライン方式）に失敗する可能性があります。`);
-        const dataUrl = await readFileAsDataURL(file);
-        AppState.attachedFiles.push({ name:file.name, mimeType:file.type || 'application/pdf', isImage:false, isAudio:false, isPdf:true, isVideo:false, data:dataUrl });
-      } else if (isVideo) {
-        // Video understanding（公式: ai.google.dev/gemini-api/docs/video-understanding）。
-        // inline送信は合計リクエスト20MB未満の短い動画向け。
-        if (file.size > 20 * 1024 * 1024) alert(`「${file.name}」は20MBを超えています。Geminiへの送信（インライン方式）に失敗する可能性があります。短い動画に分割するか、より小さいファイルをお試しください。`);
-        const dataUrl = await readFileAsDataURL(file);
-        AppState.attachedFiles.push({ name:file.name, mimeType:file.type || 'video/mp4', isImage:false, isAudio:false, isPdf:false, isVideo:true, data:dataUrl });
-      } else {
-        const textData = await file.text();
-        AppState.attachedFiles.push({ name:file.name, mimeType:file.type || 'text/plain', isImage:false, isAudio:false, isPdf:false, isVideo:false, data:textData });
+      try {
+        const isImage = file.type.startsWith('image/');
+        const isAudio = file.type.startsWith('audio/');
+        // PDF/動画は拡張子だけでなくMIMEでも判定する（"ファイル"経由でMIMEが空の場合は拡張子で補完）。
+        const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
+        const isVideo = file.type.startsWith('video/');
+        if (isImage) {
+          // 透過を持ちうる形式（PNG/WebP/GIF）はPNGのまま縮小し、それ以外はJPEG化する。mimeTypeは実際の出力形式に合わせる。
+          const keepAlpha = /^image\/(png|webp|gif)$/i.test(file.type);
+          let compressed;
+          try { compressed = await compressImage(file, 1024, 0.8, { keepAlpha }); }
+          catch { alert(`「${file.name || '画像'}」を読み込めませんでした。HEIC/HEIFなど端末が表示できない形式の可能性があります。JPEGまたはPNGに変換してお試しください。`); return; }
+          const outMime = (compressed.match(/^data:([^;]+);/) || [])[1] || 'image/jpeg';
+          AppState.attachedFiles.push({ name:file.name, mimeType:outMime, isImage:true, isAudio:false, isPdf:false, isVideo:false, data:compressed });
+        } else if (isAudio) {
+          // 公式サポート形式（wav/mp3/aiff/aac/ogg/flac/mpeg/m4a/l16/opus/alaw/mulaw/webm）以外は
+          // Gemini側で拒否される可能性があるため、送信前に軽く警告する。
+          const supported = /^audio\/(wav|x-wav|mpeg|mp3|aiff|x-aiff|aac|ogg|flac|x-flac|m4a|x-m4a|l16|opus|alaw|mulaw|webm)/i.test(file.type);
+          if (!supported) alert(`「${file.name}」の形式（${file.type || '不明'}）はGemini 3.5 Transcribeの対応形式と異なる可能性があります。送信は試行されますが、失敗する場合はWAV/MP3等に変換してください。`);
+          const dataUrl = await readFileAsDataURL(file);
+          AppState.attachedFiles.push({ name:file.name, mimeType:file.type || 'audio/mpeg', isImage:false, isAudio:true, isPdf:false, isVideo:false, data:dataUrl });
+        } else if (isPdf) {
+          // PDF/Document understanding（公式: ai.google.dev/gemini-api/docs/document-processing）。
+          // inline送信は合計リクエスト20MBまでが目安。
+          if (file.size > 20 * 1024 * 1024) alert(`「${file.name}」は20MBを超えています。Geminiへの送信（インライン方式）に失敗する可能性があります。`);
+          const dataUrl = await readFileAsDataURL(file);
+          AppState.attachedFiles.push({ name:file.name, mimeType:file.type || 'application/pdf', isImage:false, isAudio:false, isPdf:true, isVideo:false, data:dataUrl });
+        } else if (isVideo) {
+          // Video understanding（公式: ai.google.dev/gemini-api/docs/video-understanding）。
+          if (file.size > 20 * 1024 * 1024) alert(`「${file.name}」は20MBを超えています。Geminiへの送信（インライン方式）に失敗する可能性があります。短い動画に分割するか、より小さいファイルをお試しください。`);
+          const dataUrl = await readFileAsDataURL(file);
+          AppState.attachedFiles.push({ name:file.name, mimeType:file.type || 'video/mp4', isImage:false, isAudio:false, isPdf:false, isVideo:true, data:dataUrl });
+        } else if (TEXT_MIME_RE.test(file.type || '') || TEXT_EXT_RE.test(file.name || '')) {
+          // テキスト系：プロンプトへ埋め込むため上限を設ける
+          if (file.size > TEXT_ATTACH_MAX_BYTES) { alert(`「${file.name}」は${Math.round(TEXT_ATTACH_MAX_BYTES / 1024)}KBを超えるため、テキストとして添付できません。内容を分割してお試しください。`); return; }
+          const textData = await file.text();
+          AppState.attachedFiles.push({ name:file.name, mimeType:file.type || 'text/plain', isImage:false, isAudio:false, isPdf:false, isVideo:false, isBinary:false, data:textData });
+        } else {
+          // xlsx/docx/zip などのバイナリ：テキスト化すると壊れるためDataURLで保持し、プロンプトには埋め込まない（Code Execution有効時のみFiles API経由で送る）
+          if (file.size > BINARY_ATTACH_MAX_BYTES) { alert(`「${file.name}」は${Math.round(BINARY_ATTACH_MAX_BYTES / 1024 / 1024)}MBを超えるため添付できません。`); return; }
+          const dataUrl = await readFileAsDataURL(file);
+          AppState.attachedFiles.push({ name:file.name, mimeType:file.type || 'application/octet-stream', isImage:false, isAudio:false, isPdf:false, isVideo:false, isBinary:true, data:dataUrl });
+          showUserNotice(`「${file.name}」はバイナリファイルのため、OpenAIのCode Execution有効時のみ送信されます。`);
+        }
+        this.renderAttachmentChips();
+      } catch (err) {
+        console.error('添付処理エラー:', err);
+        alert(`「${file.name || 'ファイル'}」を添付できませんでした。`);
       }
-      this.renderAttachmentChips();
     };
     // ファイル選択ダイアログ（種類ごとにaccept/captureを出し分ける）を起動する共通処理。
     const launchFilePicker = (type) => {
@@ -2752,7 +3096,8 @@ const UI = {
     let speechOperationBusy = false;
     let speechStopPromise = null;
     let speechConfirmTimer = null;
-    const SPEECH_PREPARE_DELAY_MS = 800;
+    // 認識言語：端末の言語に合わせる（取得できなければ日本語）
+    const getSpeechLanguage = () => (navigator.language && /^[a-z]{2,3}(-[A-Za-z0-9]+)*$/.test(navigator.language)) ? navigator.language : 'ja-JP';
 
     const setMicRecordingVisual = (on) => {
       if (micBtn) micBtn.classList.toggle('recording', on);
@@ -2801,12 +3146,14 @@ const UI = {
       modal.hidden = false;
 
       cancelBtn.onclick = () => closeSpeechConfirmModal();
-      speechConfirmTimer = setTimeout(() => {
-        speechConfirmTimer = null;
-        if (modal.hidden) return;
-        status.textContent = '音声入力を開始できます';
-        startBtn.disabled = false;
-      }, SPEECH_PREPARE_DELAY_MS);
+      // 擬似的な待ち時間は使わず、実際に音声認識が利用可能かを確認できた時点で開始ボタンを有効にする
+      Promise.resolve().then(() => (SpeechRecognition?.available ? SpeechRecognition.available() : { available:true }))
+        .then((r) => {
+          if (modal.hidden) return;
+          if (r && r.available === false) { status.textContent = 'この端末では音声認識を利用できません'; return; }
+          status.textContent = '音声入力を開始できます'; startBtn.disabled = false;
+        })
+        .catch(() => { if (modal.hidden) return; status.textContent = '音声入力を開始できます'; startBtn.disabled = false; });
 
       startBtn.onclick = async () => {
         if (startBtn.disabled || speechOperationBusy) return;
@@ -2872,7 +3219,7 @@ const UI = {
         setMicRecordingVisual(true);
 
         const result = await SpeechRecognition.start({
-          language: 'ja-JP',
+          language: getSpeechLanguage(),
           maxResults: 1,
           prompt: '音声を入力してください',
           partialResults: false,
@@ -2938,9 +3285,15 @@ const UI = {
       AppState.keys.ChatGPT = getVal('chatgpt-key-input');
       AppState.keys.Gemini = getVal('gemini-key-input');
       AppState.keys.ClaudeCode = getVal('claudecode-key-input');
-      await setSecure('apiKey.ChatGPT', AppState.keys.ChatGPT);
-      await setSecure('apiKey.Gemini', AppState.keys.Gemini);
-      await setSecure('apiKey.ClaudeCode', AppState.keys.ClaudeCode);
+      try {
+        await setSecure('apiKey.ChatGPT', AppState.keys.ChatGPT);
+        await setSecure('apiKey.Gemini', AppState.keys.Gemini);
+        await setSecure('apiKey.ClaudeCode', AppState.keys.ClaudeCode);
+      } catch (e) {
+        console.error('APIキーの保存に失敗しました。', e);
+        alert('APIキーを保存できませんでした。端末のSecure Storageの状態を確認して、もう一度お試しください。');
+        return;
+      }
       closeModal('apikeys-modal');
     };
 
@@ -2962,7 +3315,8 @@ const UI = {
         // Daily = 軽量・低コスト側、Work = 通常（非特化）側 の2段階のみを自動選定する。
         if (chatgptKey) {
           const list = await ProviderService.fetchOpenAIModels(chatgptKey);
-          const valid = list.filter(Boolean);
+          // embedding / tts / moderation / 画像 / realtime などチャット用でないモデルは自動選定から除外する（能力推測ではなく用途違いの除外のみ）
+          const valid = list.filter(id => id && !/(embedding|whisper|tts|transcribe|moderation|dall-e|gpt-image|realtime|audio|davinci|babbage|omni-moderation|search-preview|computer-use|sora)/i.test(id));
           const daily = valid[0];
           const work = valid[1] || valid[0];
           if (daily) setModelEditorName('ChatGPT','QuickModel',daily);
@@ -2970,8 +3324,8 @@ const UI = {
         }
         if (geminiKey) {
           const list = await ProviderService.fetchGeminiModels(geminiKey);
-          // モデル名による能力フィルタは行わない。
-          const valid = list.filter(Boolean);
+          // 画像・音声・埋め込み・動画など用途違いのモデルだけ除外する。
+          const valid = list.filter(id => id && !/(embedding|imagen|veo|tts|transcribe|aqa|image|live|audio|robotics|computer-use)/i.test(id));
           const daily = valid[0];
           const work = valid[1] || valid[0];
           if (daily) setModelEditorName('Gemini','QuickModel',daily);
@@ -3094,6 +3448,7 @@ const UI = {
       view.textContent=logs.length ? logs.map(x => JSON.stringify(x,null,2)).join('\n\n==============================\n\n') : '診断ログはありません。';
     };
     document.getElementById('export-diagnostics-btn').onclick = async () => {
+      if (!confirm('診断ログには、各リクエストのプロンプト冒頭（最大80文字）やエラーメッセージが含まれます。共有する場合は内容を確認してください。保存しますか？')) return;
       const logs=await loadRecentRequestDiagnostics(200);
       downloadJsonFile(`favhub_diagnostics_${new Date().toISOString().replace(/[:.]/g,'-')}.json`, logs);
     };
@@ -3120,177 +3475,6 @@ const UI = {
     catch(error){if(diagnostic)failRequestDiagnostic(diagnostic,'render',error);setRequestState('Failed');syncRequestControls();return false;}
   },
 
-  async handleSend() {
-    if (AppState.RequestState === 'Processing') return;
-    const input = document.getElementById('user-input');
-    const text = input.value.trim();
-    if (!text && AppState.attachedFiles.length === 0) return;
-
-    const service = AppState.CurrentAIModel.service;
-    const slot = AppState.CurrentAIModel.slot;
-    const apiKey = AppState.keys[service] || await getSecure(`apiKey.${service}`);
-    if (!apiKey) { this.populateApiKeysForm(); openModal('apikeys-modal'); return; }
-    AppState.keys[service] = apiKey;
-
-    clearImmersiveTimer(); ExitImmersiveView();
-
-    AppState.CurrentRequestContent = text;
-    AppState.CurrentAIOutput = '';
-    // このターンの生成物データはリセットするが、表示（response-media）はあえてクリアしない。
-    // 過去のターンで生成された画像/音声/動画は、応答待ちの間もそのまま見え続けるようにする。
-    AppState.CurrentAIOutputMedia = [];
-    setRequestState('Processing');
-    StartIllustrationProcessing();
-    this.syncOutputPanel(); // busyモード: 初期テキストのローテーションを止める
-
-    const sendBtn = document.getElementById('send-btn');
-    const stopBtn = document.getElementById('stop-btn');
-    const regenerateBtn = document.getElementById('regenerate-btn');
-    sendBtn.disabled = true; stopBtn.hidden = false; stopBtn.disabled = false;
-    regenerateBtn.disabled = true; regenerateBtn.classList.add('spinning');
-
-    WaitingTextManager.start(currentServiceWaitingTexts(), (t) => this.setWaitingText(t));
-    startImmersiveTimer();
-
-    const modelDef = AppState.modelConfig[service].models[slot];
-    const cfg = AppState.modelConfig[service];
-    const persona = AppState.systemPrompts[service] || '';
-    const useGeminiInteractionId = service === 'Gemini' && modelDef.contextStrategy === 'Provider';
-    const mode = CONTEXT_MODES.includes(AppState.AIContext) ? AppState.AIContext : 'Deep';
-    const recentExchanges = (mode === 'Single' || mode === 'Off') ? [] : AppState.conversationHistory.slice(-4);
-    const diagnostic=createRequestDiagnostic({service,model:modelDef.name,mode,interactionIdEnabled:useGeminiInteractionId,flexEnabled:service==='Gemini' && !!AppState.GeminiFlexInferenceEnabled,prompt:text});
-    AppState.lastRequestResult=null;
-
-    // Off（Direct）はアプリ側のコンテキスト機能・カスタム指示を一切使わない直結モードのため、
-    // ペルソナ（systemPrompt）自体も送らない。
-    let systemPrompt = mode === 'Off' ? '' : persona;
-    if (mode === 'Deep') {
-      const currentContextText = hierarchicalContextHasContent(AppState.hierarchicalContext)
-        ? `<hierarchical_context>\n${JSON.stringify(AppState.hierarchicalContext)}\n</hierarchical_context>`
-        : '';
-      systemPrompt = [persona, currentContextText, buildHierarchicalContextInstruction()].filter(s => s && s.trim()).join('\n\n');
-    }
-
-    AppState.abortController = new AbortController();
-    const attachmentsToSend = [...AppState.attachedFiles];
-    let output = '';
-    const onDelta = (delta) => {
-      output += delta;
-      AppState.CurrentAIOutput = output;
-      const visible = output.includes(HCONTEXT_DELIMITER)
-        ? output.slice(0, output.indexOf(HCONTEXT_DELIMITER)).trimEnd()
-        : output;
-      this.renderResponseText(visible);
-    };
-    // onMedia受信時点では、まだそのターンの表示を確定しない
-    // （成功パスでconversationHistoryへpushした後にまとめて累積ギャラリーとして描画する）。
-    const onMedia = (media) => { AppState.CurrentAIOutputMedia = media; };
-
-    try {
-      const common = { endpoint: cfg.endpoint, apiKey, model: modelDef.name, systemPrompt, history: recentExchanges, prompt: text, attachments: attachmentsToSend, signal: AppState.abortController.signal, onDelta };
-      const callProvider = () => {
-        if (service === 'ChatGPT') return ProviderService.sendChatGPT(common);
-        if (service === 'Gemini') return ProviderService.sendGemini({
-          ...common,
-          onMedia,
-          useInteractionId: useGeminiInteractionId,
-          previousInteractionId: useGeminiInteractionId ? AppState.GeminiInteractionId : null,
-          onInteractionId: (id) => { AppState.GeminiInteractionId = id; saveGeminiInteractionId(); }
-        });
-        return ProviderService.sendClaudeCode({ ...common, useThinking: false });
-      };
-      // 画像生成では重複生成を避けるため自動リトライしない。
-      let providerMeta = null;
-      try { providerMeta = await callProvider(); }
-      catch(err){ failRequestDiagnostic(diagnostic,err?.name==='TimeoutError'?'api-timeout':'api',err); throw err; }
-      markRequestDiagnostic(diagnostic,'response_received',{status:'response-received',textReceived:!!String(output||'').trim(),...(providerMeta || {})});
-      WaitingTextManager.stop(); this.setWaitingText(''); stopBtn.hidden=true;
-      setRequestState('ResponseReceived'); syncRequestControls();
-
-      let body = (output || '').trim();
-      if (mode === 'Deep') {
-        const parsed = parseReplyWithHierarchicalContext(output, AppState.hierarchicalContext);
-        body = parsed.body;
-        AppState.hierarchicalContext = parsed.context;
-        saveHierarchicalContext();
-        this.renderHierarchicalContextDisplay();
-      }
-      // 実データ（media）が1件も無いのに、テキスト側に画像タグらしきものが含まれる場合は、
-      // 使用モデルが画像生成に対応しておらず「生成したふり」をしている可能性が高いので明示する。
-      if (service === 'Gemini' && !(AppState.CurrentAIOutputMedia || []).length && looksLikeHallucinatedMediaTag(body)) {
-        body += `\n\n⚠️ 現在の「${slot === 'QuickModel' ? 'Daily' : 'Work'}」モデル（${modelDef.name}）は画像/動画等の直接生成に対応していない可能性があります。AIが実際には生成せず、生成したふりのタグ・URLを書いている可能性があります。設定 > 使用モデルで、画像生成対応モデル（例: gemini-3.1-flash-lite-image, gemini-3.1-flash-image, gemini-3-pro-image 等）に変更してください。`;
-      }
-
-      const now = new Date().toISOString();
-      const responseMedia = AppState.CurrentAIOutputMedia || [];
-      markRequestDiagnostic(diagnostic,'media_detected',{mediaReceived:responseMedia.length>0,mediaCount:responseMedia.length});
-      setRequestState('Rendering'); syncRequestControls(); markRequestDiagnostic(diagnostic,'render_start');
-      AppState.conversationHistory.push({ role:'user', content:text, provider:service, timestamp:now });
-      AppState.conversationHistory.push({ role:'assistant', content:body, provider:service, timestamp:now, media: responseMedia });
-      saveConversationHistory();
-      // 生成物の表示は、このターンだけでなく会話全体の累積ギャラリーとして更新する
-      // （何度生成しても過去分が消えないようにするため）。
-      await this.renderResponseMedia(buildSessionMediaGallery(AppState.conversationHistory));
-      if (responseMedia.length) {
-        diagnostic.mediaRendered=true;
-        markRequestDiagnostic(diagnostic,'media_rendered');
-      } else {
-        diagnostic.mediaRendered=false;
-        markRequestDiagnostic(diagnostic,'no_media',{mediaReceived:false,mediaCount:0});
-      }
-
-      AppState.lastResponse = body; localStorage.setItem('favhub_last_response', body);
-      // 生成物（画像/音声/動画/ファイル）は再送信しなくても復元後に表示され続けるよう永続化する（72時間で自動破棄）
-      AppState.lastResponseMedia = responseMedia;
-      displayRandomIllustration();
-      await CompleteIllustrationTransition();
-      setRequestState('Completed');
-      clearImmersiveTimer();
-      AppState.lastRequestResult={status:'success',body,media:responseMedia};
-      markRequestDiagnostic(diagnostic,'completed',{status:'success'});
-      syncRequestControls();
-
-      // 履歴(RequestLog)は新規チャット単位で1件。CurrentChatIdをキーに上書き更新する
-      // （タイトルは会話の最初の発言、作成日時も最初の発言時刻で固定し、更新日時だけ進める）
-      await SaveRequestLog({
-        RequestId: AppState.CurrentChatId,
-        RequestTitle: (AppState.conversationHistory[0]?.content || text).slice(0, 40) || '無題',
-        RequestDate: AppState.conversationHistory[0]?.timestamp || now,
-        RequestUpdatedDate: now,
-        RequestContent: text, AIOutput: body, AIOutputMedia: responseMedia, service,
-        history: JSON.parse(JSON.stringify(AppState.conversationHistory)),
-        GeminiInteractionId: useGeminiInteractionId ? AppState.GeminiInteractionId : null
-      });
-
-      input.value = ''; AppState.attachedFiles = []; this.renderAttachmentChips(); autosize();
-    } catch (error) {
-      const mapped = MapProviderError(error);
-      WaitingTextManager.stop(); stopBtn.hidden = true; clearImmersiveTimer();
-      appEl.dataset.illustrationState = 'Static';
-      if (mapped.code === 'ABORTED') { diagnostic.status='aborted'; diagnostic.phase='abort'; diagnostic.error={name:error?.name||'AbortError',message:String(mapped.message||'中断').slice(0,2000),timestamp:GetCurrentTimestamp()}; persistRequestDiagnostic(diagnostic); }
-      else if (diagnostic.status !== 'api-error' && diagnostic.status !== 'timeout') failRequestDiagnostic(diagnostic,'api',error);
-      AppState.lastRequestResult={status:mapped.code==='ABORTED'?'aborted':'error',error:mapped};
-      appEl.dataset.illustrationState = 'Static';
-      if (mapped.code === 'ABORTED') {
-        setRequestState('Interrupted'); syncRequestControls();
-        this.renderResponseText(output || '');
-        if (output) {
-          const now = new Date().toISOString();
-          const abortedMedia = AppState.CurrentAIOutputMedia || [];
-          AppState.conversationHistory.push({ role:'user', content:text, provider:service, timestamp:now });
-          AppState.conversationHistory.push({ role:'assistant', content:output, provider:service, timestamp:now, media: abortedMedia });
-          saveConversationHistory();
-          AppState.lastResponseMedia = abortedMedia;
-          this.renderResponseMedia(buildSessionMediaGallery(AppState.conversationHistory));
-          await SaveRequestLog({ RequestId:AppState.CurrentChatId, RequestTitle:(AppState.conversationHistory[0]?.content || text).slice(0,40)||'無題', RequestDate:AppState.conversationHistory[0]?.timestamp || now, RequestUpdatedDate:now, RequestContent:text, AIOutput:output, AIOutputMedia: abortedMedia, service, history: JSON.parse(JSON.stringify(AppState.conversationHistory)) });
-        }
-      } else {
-        setRequestState('Failed'); syncRequestControls();
-        this.renderResponseText(output ? `${output}\n\n⚠️ 【${service} エラー】\n${mapped.message}` : `⚠️ 【${service} エラー】\n${mapped.message}`);
-      }
-    } finally { AppState.abortController = null; }
-  },
-
   /* ---------------- 新規依頼（仕様書 NewRequest 準拠） ----------------
    * ・履歴(RequestLog)は新規チャットごとに1件のため、ここで新しいCurrentChatIdを発行する。
    * ・階層化コンテキストは新規チャットへ引き継がない（会話ごとにリセットする）。
@@ -3298,6 +3482,7 @@ const UI = {
    * ------------------------------------------------------------ */
   newRequest() {
     try {
+      cancelInflightRequest(); revokeTrackedObjectUrls();
       WaitingTextManager.stop(); clearImmersiveTimer(); ExitImmersiveView();
       if (typeof CanonicalStore !== 'undefined') CanonicalStore.garbageCollectMedia().catch(()=>{});
       AppState.conversationHistory=[]; saveConversationHistory();
@@ -3427,6 +3612,7 @@ const UNLIMITED_TURNS = 99;
 const SLOT_CONTEXT_STRATEGIES = ['Auto','FavHub','Provider','Direct'];
 const SLOT_OUTPUT_MODALITIES = ['auto','text','image','tts','transcribe','video'];
 const SLOT_TRANSPORTS = ['default','interactions'];
+const OPENAI_DEFAULT_OPTIONS = Object.freeze({webSearch:false,codeExecution:false,imageGeneration:false,codeExecutionMemory:'1g',ttsVoice:'marin',ttsFormat:'mp3',ttsInstructions:'',transcriptionLanguage:'',imageSize:'auto',imageQuality:'auto',imageBackground:'auto',imageFormat:'png',imageToolModel:'gpt-image-2.5-flare'});
 const DEFAULT_SLOT_CONFIG = { contextStrategy:'Auto', outputModality:'text', transport:'default', maxOutputTokens:null, thinking:{enabled:false,budgetTokens:null}, recentTurns:2 };
 const ADAPTER_CAPABILITIES = {
   gemini: { defaultStrategy:'Provider', supportedStrategies:['Auto','FavHub','Provider','Direct'], transports:['default','interactions'] },
@@ -3441,14 +3627,24 @@ function normalizeSlotConfig(raw, adapterId, diagnostics=[]) {
   // 旧Gemini設定のInteraction API=利用するは、現在の「API依存」へ移行する。
   if(adapterId==='gemini' && c.transport==='interactions' && strategy!=='Provider') strategy='Provider';
   const output = SLOT_OUTPUT_MODALITIES.includes(c.outputModality) ? c.outputModality : 'text';
-  const transport = SLOT_TRANSPORTS.includes(c.transport) || (adapterId==='openai' && c.transport==='responses') ? c.transport : 'default';
+  const transport = adapterId==='openai' ? 'responses' : (SLOT_TRANSPORTS.includes(c.transport) ? c.transport : 'default');
   let recent = Number.isInteger(c.recentTurns) ? c.recentTurns : DEFAULT_SLOT_CONFIG.recentTurns;
   if (recent < 1 || recent > UNLIMITED_TURNS) { diagnostics.push('recentTurnsを2へ補正'); recent=2; }
   let max = c.maxOutputTokens == null || c.maxOutputTokens === '' ? null : Number(c.maxOutputTokens);
   if (!Number.isFinite(max) || max <= 0) max=null;
   const thinking = c.thinking && typeof c.thinking==='object' ? c.thinking : {};
   const budget = thinking.budgetTokens == null || thinking.budgetTokens === '' ? null : Number(thinking.budgetTokens);
-  return { contextStrategy:strategy, outputModality:output, transport, maxOutputTokens:max, thinking:{enabled:!!thinking.enabled,budgetTokens:Number.isFinite(budget)&&budget>0?budget:null}, recentTurns:recent, geminiOptions:cloneJson(c.geminiOptions||{}) };
+  return {
+    contextStrategy:strategy,
+    outputModality:output,
+    transport,
+    maxOutputTokens:max,
+    thinking:{enabled:!!thinking.enabled,budgetTokens:Number.isFinite(budget)&&budget>0?budget:null},
+    recentTurns:recent,
+    geminiOptions:cloneJson(c.geminiOptions||{}),
+    openaiOptions:{...OPENAI_DEFAULT_OPTIONS,...(c.openaiOptions||{})}
+
+  };
 }
 
 function ensureSlotConfigsInMemory(){
@@ -3461,6 +3657,8 @@ function ensureSlotConfigsInMemory(){
       m.maxOutputTokens = m.maxOutputTokens ?? null;
       m.thinking = m.thinking || {enabled:false,budgetTokens:null};
       m.recentTurns = Number.isInteger(m.recentTurns) ? m.recentTurns : 2;
+      m.openaiOptions = {...OPENAI_DEFAULT_OPTIONS,...(m.openaiOptions||{})};
+      if(!['1g','4g','16g','64g'].includes(m.openaiOptions.codeExecutionMemory)) m.openaiOptions.codeExecutionMemory='1g';
       if(AppState.modelConfig[service].provider==='gemini'){
         const legacyGemini={
           searchGrounding:!!AppState.GeminiSearchGroundingEnabled,
@@ -3478,7 +3676,7 @@ function ensureSlotConfigsInMemory(){
       }
       m.contextStrategy = SLOT_CONTEXT_STRATEGIES.includes(m.contextStrategy)?m.contextStrategy:'Auto';
       m.outputModality = SLOT_OUTPUT_MODALITIES.includes(m.outputModality)?m.outputModality:'text';
-      m.transport = (SLOT_TRANSPORTS.includes(m.transport) || (AppState.modelConfig[service].provider==='openai' && m.transport==='responses'))?m.transport:'default';
+      m.transport = AppState.modelConfig[service].provider==='openai' ? 'responses' : (SLOT_TRANSPORTS.includes(m.transport)?m.transport:'default');
       if(m.recentTurns<1||m.recentTurns>99)m.recentTurns=2;
     }
   }
@@ -3500,7 +3698,11 @@ function setModelEditorName(service, slot, name){
   if(el) el.value=String(name||'');
   else {
     ensureSlotConfigsInMemory();
-    if(AppState.modelConfig?.[service]?.models?.[slot]) AppState.modelConfig[service].models[slot].name=String(name||'');
+    if(AppState.modelConfig?.[service]?.models?.[slot]) {
+      AppState.modelConfig[service].models[slot].name=String(name||'');
+      // モデル設定画面が開かれていない場合は入力欄が存在しないため、ここで永続化しないと再起動で戻ってしまう
+      try { saveSlotConfig(); } catch(e) { console.warn('モデル名の保存に失敗しました。', e); }
+    }
   }
 }
 function populateSlotConfigEditor(){
@@ -3574,8 +3776,35 @@ function renderApiSlotConfigEditor(serviceFilter='Gemini'){
   const transport=(m)=>provider==='gemini'
     ? ''
     : provider==='openai'
-    ? `<div><label>OpenAIはResponses API</label>${inlineSelectHtml('transport',m.transport||'default',[['default','利用しない'],['responses','利用する']])}<div class="config-help">このDaily/WorkモデルだけでResponses APIを使用します。</div></div>`
+    ? '<div><label>OpenAI API方式</label><div class="config-help">Responses APIを固定で使用します。旧transport設定は互換のため保持されますが、OpenAIでは使用しません。</div></div>'
     : `<div><label>API方式</label>${inlineSelectHtml('transport','default',[['default','Messages API（標準）',true]])}</div>`;
+  const openaiOptions=(m)=>{
+    const o=m.openaiOptions||{};
+    return provider!=='openai'?'':`<div class="gemini-slot-tools">
+      <h5>OpenAI Tools</h5>
+      <div class="config-help">Responses APIの内蔵ツールです。必要なものだけを有効にしてください。</div>
+      <label class="check-row"><input type="checkbox" data-ofield="webSearch" ${o.webSearch?'checked':''}><span>Web Search</span></label>
+      <div class="config-help">最新情報をWeb検索し、回答に出典URLを付与します。</div>
+      <label class="check-row"><input type="checkbox" data-ofield="codeExecution" ${o.codeExecution?'checked':''}><span>Code Execution</span></label>
+      <div class="config-help">Pythonをサンドボックスで実行します。添付したCSV/PDF等はOpenAI Files API経由でCode Interpreterへ渡します。</div>
+      <div class="slot-grid">
+        <div><label>Code Interpreter メモリ</label>${inlineSelectHtml('codeExecutionMemory',o.codeExecutionMemory||'1g',[['1g','1 GB'],['4g','4 GB'],['16g','16 GB'],['64g','64 GB']])}<div class="config-help">既定は1 GB。必要な場合だけ上位メモリを選択します。</div></div>
+      </div>
+      <label class="check-row"><input type="checkbox" data-ofield="imageGeneration" ${o.imageGeneration?'checked':''}><span>Image Generation</span></label>
+      <div class="config-help">Responses APIのimage_generation toolを使用します。出力形式=画像の場合は専用Images APIを使用します。</div>
+      <div class="slot-grid">
+        <div><label>TTS Voice</label><input data-ofield="ttsVoice" value="${escapeHtmlAttr(o.ttsVoice||'marin')}" placeholder="marin"></div>
+        <div><label>TTS Format</label>${inlineSelectHtml('ttsFormat',o.ttsFormat||'mp3',[['mp3','mp3'],['opus','opus'],['aac','aac'],['flac','flac'],['wav','wav'],['pcm','pcm']])}</div>
+        <div><label>文字起こし Language</label><input data-ofield="transcriptionLanguage" value="${escapeHtmlAttr(o.transcriptionLanguage||'')}" placeholder="任意のISO-639-1コード"></div>
+        <div><label>画像 Size</label><input data-ofield="imageSize" value="${escapeHtmlAttr(o.imageSize||'auto')}" placeholder="auto / 1024x1024 等"></div>
+        <div><label>画像 Quality</label>${inlineSelectHtml('imageQuality',o.imageQuality||'auto',[['auto','auto'],['low','low'],['medium','medium'],['high','high'],['xhigh','xhigh'],['max','max']])}</div>
+        <div><label>画像 Background</label>${inlineSelectHtml('imageBackground',o.imageBackground||'auto',[['auto','auto'],['opaque','opaque'],['transparent','transparent']])}</div>
+        <div><label>画像ツール モデル</label><input data-ofield="imageToolModel" value="${escapeHtmlAttr(o.imageToolModel||'gpt-image-2.5-flare')}" placeholder="gpt-image-2.5-flare"><div class="config-help">Image Generation ツールが使う画像モデル名です。</div></div>
+        <div><label>画像 Format</label>${inlineSelectHtml('imageFormat',o.imageFormat||'png',[['png','png'],['jpeg','jpeg'],['webp','webp']])}<div class="config-help">Background=transparent時はpng/webpを使用します。</div></div>
+      </div>
+      <div><label>TTS Instructions</label><input data-ofield="ttsInstructions" value="${escapeHtmlAttr(o.ttsInstructions||'')}" placeholder="任意"></div>
+    </div>`;
+  };
   const geminiOptions=(m)=>{
     const g=m.geminiOptions||{};
     return provider!=='gemini'?'':`<div class="gemini-slot-tools">
@@ -3615,7 +3844,7 @@ function renderApiSlotConfigEditor(serviceFilter='Gemini'){
         <div><label>会話保持ターン数</label><input data-field="recentTurns" type="number" min="1" max="99" value="${m.recentTurns}"><div class="slot-note">99 = 保存済み会話を全て送信</div></div>
         <div><label>推論</label>${inlineSelectHtml('thinkingEnabled',m.thinking?.enabled?'true':'false',[['false','OFF'],['true','ON']])}</div>
         <div><label>推論トークン量</label><input data-field="thinkingBudgetTokens" type="number" min="1" value="${m.thinking?.budgetTokens??''}" placeholder="自動"><div class="config-help">Providerによって指定方法が異なります。</div></div>
-      </div>${geminiOptions(m)}
+      </div>${openaiOptions(m)}${geminiOptions(m)}
     </div>`;
   }).join('')}</section>`;
   bindInlineSelects(root);
@@ -3630,10 +3859,29 @@ function readApiSlotConfigEditor(serviceFilter='Gemini'){
     const get=f=>card.querySelector(`[data-field="${f}"]`);
     m.contextStrategy=inlineSelectValue(card,'contextStrategy','Auto');
     m.outputModality=inlineSelectValue(card,'outputModality','auto');
-    const transportValue=inlineSelectValue(card,'transport',m.transport||'default'); if(provider==='openai')m.transport=transportValue||'default';
+    if(provider==='openai')m.transport='responses'; else { const transportValue=inlineSelectValue(card,'transport',m.transport||'default'); m.transport=transportValue||'default'; }
     const r=Number(get('recentTurns')?.value);m.recentTurns=Number.isInteger(r)&&r>=1&&r<=99?r:2;
     const mx=Number(get('maxOutputTokens')?.value);m.maxOutputTokens=Number.isFinite(mx)&&mx>0?mx:null;
     const tb=Number(get('thinkingBudgetTokens')?.value);m.thinking={enabled:inlineSelectValue(card,'thinkingEnabled',m.thinking?.enabled?'true':'false')==='true',budgetTokens:Number.isFinite(tb)&&tb>0?tb:null};
+    if(service==='ChatGPT'){
+      const o=m.openaiOptions||{}; const of=f=>card.querySelector(`[data-ofield="${f}"]`);
+      m.openaiOptions={
+        ...o,
+        webSearch:!!of('webSearch')?.checked,
+        codeExecution:!!of('codeExecution')?.checked,
+        imageGeneration:!!of('imageGeneration')?.checked,
+        codeExecutionMemory:inlineSelectValue(card,'codeExecutionMemory',o.codeExecutionMemory||'1g'),
+        ttsVoice:of('ttsVoice')?.value?.trim()||'marin',
+        ttsFormat:inlineSelectValue(card,'ttsFormat',o.ttsFormat||'mp3'),
+        ttsInstructions:of('ttsInstructions')?.value||'',
+        transcriptionLanguage:of('transcriptionLanguage')?.value?.trim()||'',
+        imageSize:of('imageSize')?.value?.trim()||'auto',
+        imageQuality:inlineSelectValue(card,'imageQuality',o.imageQuality||'auto'),
+        imageBackground:inlineSelectValue(card,'imageBackground',o.imageBackground||'auto'),
+        imageFormat:inlineSelectValue(card,'imageFormat',o.imageFormat||'png'),
+        imageToolModel:of('imageToolModel')?.value?.trim()||'gpt-image-2.5-flare'
+      };
+    }
     if(service==='Gemini'){
       const g=m.geminiOptions||{}; const gf=f=>card.querySelector(`[data-gfield="${f}"]`);
       m.geminiOptions={...g,searchGrounding:!!gf('searchGrounding')?.checked,urlContext:!!gf('urlContext')?.checked,codeExecution:!!gf('codeExecution')?.checked,mapsGrounding:!!gf('mapsGrounding')?.checked,mapsLatitude:gf('mapsLatitude')?.value?.trim()||'',mapsLongitude:gf('mapsLongitude')?.value?.trim()||'',flexInference:!!gf('flexInference')?.checked,ttsVoice:gf('ttsVoice')?.value?.trim()||'Kore',ttsStyle:gf('ttsStyle')?.value?.trim()||'',transcribeSmart:!!gf('transcribeSmart')?.checked};
@@ -3959,7 +4207,16 @@ async function migrateArchitectureData(){
 /* Phase 2: ContextManager / Projection */
 const ContextManager={
   resolveStrategy(adapterId,requested){const caps=ADAPTER_CAPABILITIES[adapterId]||ADAPTER_CAPABILITIES.gemini;const s=requested||'Auto';return s==='Auto'?caps.defaultStrategy:(caps.supportedStrategies.includes(s)?s:'FavHub');},
-  recentMessages(messages,recentTurns){if(recentTurns===UNLIMITED_TURNS)return cloneJson(messages||[]);const n=Math.max(1,recentTurns)*2;return cloneJson((messages||[]).slice(-n));},
+  recentMessages(messages,recentTurns){
+    const src=(recentTurns===UNLIMITED_TURNS)?cloneJson(messages||[]):cloneJson((messages||[]).slice(-Math.max(1,recentTurns)*2));
+    // 画像生成・TTS・文字起こしのターンは content が空になる。Gemini等は空テキストを拒否するため、履歴投影時だけ代替文を入れる（正本は変更しない）
+    const label={image:'画像',audio:'音声',video:'動画',file:'ファイル'};
+    return src.map(m=>{
+      if(String(m?.content||'').trim())return m;
+      const kinds=[...new Set((m?.media||[]).map(x=>x?.kind).filter(Boolean))];
+      return {...m,content:kinds.length?`（${kinds.map(k=>label[k]||k).join('・')}を出力しました）`:'（テキスト出力なし）'};
+    });
+  },
   async load(chatId){const c=await CanonicalStore.getContext(chatId);const conv=await CanonicalStore.getConversation(chatId);if(c&&conv)c.conversation.messages=cloneJson(conv.messages||[]);return c||{chatId,identity:{persona:'',customInstructions:'',responseStyle:'',behavioralRules:[]},project:cloneDefaultProjectContext(),knowledge:{urls:[],documents:[],pdfs:[],images:[],videos:[],notes:[],summaries:[]},conversation:{messages:conv?.messages||[],summary:'',compressedState:{}},request:{currentPrompt:'',attachments:[],toolResults:[]}};},
   buildProjection({adapterId,contextMode,strategy,slotConfig,canonical,request,providerState}){
     const resolved=this.resolveStrategy(adapterId,strategy); const mode=['Deep','Flow','Single'].includes(contextMode)?contextMode:'Deep';
@@ -3983,7 +4240,7 @@ const ContextManager={
     if(projection.deepUpdate) parts.push(buildHierarchicalContextInstruction());
     return parts.filter(Boolean).join('\n\n');
   },
-  extractContextUpdate({contextMode,response,finishReason}){if(contextMode!=='Deep'||finishReason==='length'||finishReason==='max_tokens'||finishReason==='max_tokens_reached')return null;const parsed=parseReplyWithHierarchicalContext(response||'',AppState.hierarchicalContext);if(!String(response||'').includes(HCONTEXT_DELIMITER))return null;return parsed.context;},
+  extractContextUpdate({contextMode,response,finishReason}){if(contextMode!=='Deep'||isTruncatedFinishReason(finishReason))return null;const parsed=parseReplyWithHierarchicalContext(response||'',AppState.hierarchicalContext);if(!String(response||'').includes(HCONTEXT_DELIMITER))return null;return parsed.context;},
   async applyContextUpdate(chatId,update,diagnostic,options={}){if(!update)return null;const current=await this.load(chatId);const previous=cloneJson(current.project||cloneDefaultProjectContext());const next=applyProjectContextPatch(previous,update);if(JSON.stringify(previous)===JSON.stringify(next))return previous;const revision=Number.isFinite(Number(current.projectRevision))?Number(current.projectRevision):0;current.projectRevision=revision+1;current.project=next;current.cacheManifest=ContextManifest.build({canonical:current,projection:null});if(options.persist!==false)await CanonicalStore.saveContext(current);AppState.hierarchicalContext=cloneJson(next);saveHierarchicalContext();return next;},
   async appendConversation(chatId,messages){await CanonicalStore.saveConversation(chatId,messages);const c=await this.load(chatId);c.conversation.messages=cloneJson(messages);c.request={currentPrompt:'',attachments:[],toolResults:[]};c.cacheManifest=ContextManifest.build({canonical:c,projection:null});await CanonicalStore.saveContext(c);}
 };
@@ -3998,7 +4255,7 @@ function normalizeProviderResponse(response,provider){
 }
 function normalizeProviderError(err){
   const e=err||new Error('Provider error');
-  if(/context|token|maximum context|too many tokens/i.test(`${e.message||''} ${e.body||''}`)){e.contextOverflow=true;}
+  if((e.status===undefined||e.status===400||e.status===413)&&isContextOverflowText(`${e.message||''} ${e.body||''}`)){e.contextOverflow=true;}
   return e;
 }
 
@@ -4009,7 +4266,7 @@ const GeminiAdapter={
     // Geminiでは「API依存」を選んだ時点でInteraction API/Interaction IDを利用する。
     // TTS/文字起こし等のInteractions専用モダリティも自動的にInteractionsへ送る。
     const useInteractions = strategy==='Provider' || s.outputModality==='tts' || s.outputModality==='transcribe';
-    const common={endpoint:req.endpoint,apiKey:req.apiKey,model:req.model,systemPrompt:req.systemPrompt,history:req.projection.recentMessages,prompt:req.request.prompt,attachments:req.request.attachments,signal:req.signal,onDelta:req.onDelta,onMedia:req.onMedia,outputModality:s.outputModality};
+    const common={endpoint:req.endpoint,apiKey:req.apiKey,model:req.model,systemPrompt:req.systemPrompt,history:req.projection.recentMessages,prompt:req.request.prompt,attachments:req.request.attachments,signal:req.signal,onDelta:req.onDelta,onReplace:req.onReplace,onMedia:req.onMedia,outputModality:s.outputModality,thinking:!!s.thinking?.enabled};
     if(useInteractions){
       return normalizeProviderResponse(await ProviderService.sendGeminiInteraction({...common,previousInteractionId:req.projection.seedNeeded?null:(req.providerState?.data?.interactionId||null),onInteractionId:req.onInteractionId,providerOptions:req.providerOptions}),'Gemini');
     }
@@ -4018,34 +4275,239 @@ const GeminiAdapter={
 };
 const OpenAIAdapter={
   id:'openai', capabilities:ADAPTER_CAPABILITIES.openai,
+
   async send(req){
-    const strategy=req.projection.strategy; const useResponses=req.slotConfig.transport==='responses' || strategy==='Provider';
-    if(useResponses) return normalizeProviderResponse(await this.sendResponses(req),'ChatGPT');
-    return normalizeProviderResponse(await ProviderService.sendChatGPT({endpoint:req.endpoint,apiKey:req.apiKey,model:req.model,systemPrompt:req.systemPrompt,history:req.projection.recentMessages,prompt:req.request.prompt,attachments:req.request.attachments,signal:req.signal,onDelta:req.onDelta}),'ChatGPT');
+    const modality=req.slotConfig.outputModality;
+    // Specialized OpenAI models use their dedicated endpoints rather than the mainline Responses model.
+    if(modality==='tts') return normalizeProviderResponse(await this.sendTTS(req),'ChatGPT');
+    if(modality==='transcribe') return normalizeProviderResponse(await this.sendTranscription(req),'ChatGPT');
+    if(modality==='image') return normalizeProviderResponse(await this.sendImage(req),'ChatGPT');
+    if(modality==='video') {
+      throw Object.assign(
+        new Error('OpenAI Videos APIは2026年9月24日に終了しているため、現在このアプリから利用できません。動画モデル設定は保持できますが、API呼び出しは実行しません。'),
+        {status:410,provider:'ChatGPT',body:'Videos API retired on 2026-09-24',videoApiUnavailable:true}
+      );
+    }
+
+    // OpenAIの新規ツール統合はResponses APIに統一する。
+    return normalizeProviderResponse(await this.sendResponses(req),'ChatGPT');
   },
+
   async sendResponses(req){
-    const url=(req.endpoint||'https://api.openai.com/v1/chat/completions').replace(/\/chat\/completions\/?$/,'/responses');
+    const base=(req.endpoint||'https://api.openai.com/v1/responses').replace(/\/chat\/completions\/?$/,'/responses');
+    const url=base.endsWith('/responses') ? base : `${base.replace(/\/+$/,'')}/responses`;
     const input=[];
     const history=req.projection.recentMessages||[];
-    for(const h of history) input.push({role:h.role==='assistant'?'assistant':'user',content:[{type:'input_text',text:h.content||''}]});
+    for(const h of history){
+      const isAssistant=h.role==='assistant';
+      input.push({
+        role:isAssistant?'assistant':'user',
+        content:[{type:isAssistant?'output_text':'input_text',text:h.content||''}]
+      });
+    }
+    const attachments=req.request.attachments||[];
     const userContent=[{type:'input_text',text:req.request.prompt||''}];
-    for(const a of req.request.attachments||[]) if(a.isImage) userContent.push({type:'input_image',image_url:a.data});
+    const opts=req.providerOptions||{};
+    const attachmentMentions=[];
+    const codeFiles=[];
+    const unsupportedAttachments=[];
+    for(const a of attachments){
+      if(a.isImage){
+        userContent.push({type:'input_image',image_url:a.data});
+        continue;
+      }
+      const isText=!a.isAudio&&!a.isPdf&&!a.isVideo&&!a.isBinary;
+      if(opts.codeExecution){
+        const raw=String(a.data||'');
+        let blob;
+        if(raw.startsWith('data:')) blob=await dataUrlToBlob(raw,a.mimeType||'application/octet-stream');
+        else blob=new Blob([raw],{type:a.mimeType||'text/plain'});
+        if(blob.size > 512 * 1024 * 1024){
+          throw Object.assign(new Error(`添付ファイル「${a.name||'ファイル'}」が大きすぎます（512 MB超）。`),{status:413,provider:'ChatGPT'});
+        }
+        attachmentMentions.push(a.name||a.mimeType||'添付ファイル');
+        const form=new FormData();
+        form.append('file',blob,a.name||'attachment');
+        form.append('purpose','user_data');
+        form.append('expires_after[anchor]','created_at');
+        form.append('expires_after[seconds]','3600');
+        const filesBase=(req.endpoint||'https://api.openai.com/v1/responses').replace(/\/(?:responses|chat\/completions)\/?$/,'');
+        const uploadRes=await fetchWithTimeout(`${filesBase}/files`,{
+          method:'POST',signal:req.signal,
+          headers:{Authorization:`Bearer ${req.apiKey}`},
+          body:form
+        },LONG_REQUEST_TIMEOUT_MS);
+        const uploadData=await uploadRes.json().catch(()=>({}));
+        if(!uploadRes.ok||uploadData.error) throw Object.assign(
+          new Error(uploadData.error?.message||`OpenAI Files API呼び出し失敗（${uploadRes.status}）`),
+          {status:uploadRes.status,provider:'ChatGPT',body:JSON.stringify(uploadData)}
+        );
+        if(uploadData.id) codeFiles.push(uploadData.id);
+      } else if(isText){
+        userContent[0].text += buildAttachmentText([a]);
+      } else {
+        unsupportedAttachments.push(a.name||a.mimeType||'添付ファイル');
+      }
+    }
+    if(attachmentMentions.length){
+      userContent[0].text += `\n\n添付ファイル: ${attachmentMentions.join('、')}`;
+    }
+    if(unsupportedAttachments.length && req.onWarning){
+      req.onWarning(`Code Executionが無効のため、次の添付はOpenAI Responses APIへ送信しませんでした：${unsupportedAttachments.join('、')}`);
+    }
     input.push({role:'user',content:userContent});
+
     const body={model:req.model,input,store:true};
     if(req.systemPrompt) body.instructions=req.systemPrompt;
-    if(!req.projection.seedNeeded && req.providerState?.data?.previousResponseId) body.previous_response_id=req.providerState.data.previousResponseId;
+    if(!req.projection.seedNeeded && req.providerState?.data?.previousResponseId){
+      body.previous_response_id=req.providerState.data.previousResponseId;
+    }
     if(Number.isFinite(req.slotConfig.maxOutputTokens)) body.max_output_tokens=req.slotConfig.maxOutputTokens;
-    if(req.slotConfig.thinking?.enabled) body.reasoning={effort:'medium'};
-    const res=await fetchWithTimeout(url,{method:'POST',signal:req.signal,headers:{Authorization:`Bearer ${req.apiKey}`,'Content-Type':'application/json'},body:JSON.stringify(body)},REQUEST_TIMEOUT_MS);
-    const data=await res.json();
-    if(!res.ok||data.error) throw Object.assign(new Error(data.error?.message||'OpenAI Responses API呼び出し失敗'),{status:res.status,provider:'ChatGPT',body:JSON.stringify(data)});
-    let text='';
-    for(const item of data.output||[]) for(const c of item.content||[]) if(c.type==='output_text') text+=c.text||'';
-    if(!text&&typeof data.output_text==='string')text=data.output_text;
-    req.onDelta(text);
-    return {finishReason:data.status==='incomplete'?(data.incomplete_details?.reason||'length'):'stop',usage:data.usage||null,previousResponseId:data.id||null};
+    if(req.slotConfig.thinking?.enabled){
+      body.reasoning={effort:'medium'};
+    }
+
+    const tools=[];
+    if(opts.webSearch) tools.push({type:'web_search'});
+    if(opts.codeExecution){
+      const container={type:'auto',memory_limit:opts.codeExecutionMemory||'1g'};
+      if(codeFiles.length) container.file_ids=codeFiles;
+      tools.push({type:'code_interpreter',container});
+      body.include=['code_interpreter_call.outputs'];
+    }
+    if(opts.imageGeneration){
+      const toolFormat=opts.imageFormat||'png';
+      const requestedToolBackground=opts.imageBackground||'auto';
+      const toolBackground=requestedToolBackground;
+      tools.push({
+        type:'image_generation',
+        model:(opts.imageToolModel||'gpt-image-2.5-flare'),
+        output_format:(toolBackground==='transparent' && toolFormat==='jpeg') ? 'png' : toolFormat,
+        quality:opts.imageQuality||'auto',
+        background:toolBackground
+      });
+    }
+    if(tools.length) body.tools=tools;
+
+    const streaming = STREAMING_ENABLED && req.slotConfig.outputModality === 'text';
+    if(streaming) body.stream=true;
+    const res=await fetchWithTimeout(url,{method:'POST',signal:req.signal,...(streaming?{keepAbortAfterResponse:true}:{}),headers:{Authorization:`Bearer ${req.apiKey}`,'Content-Type':'application/json',...(streaming?{Accept:'text/event-stream'}:{})},body:JSON.stringify(body)},streaming?REQUEST_TIMEOUT_MS:resolveRequestTimeout({modality:req.slotConfig.outputModality,thinking:!!req.slotConfig.thinking?.enabled,tools:!!(opts.webSearch||opts.codeExecution||opts.imageGeneration)}));
+    if(!streaming){
+      const data=await readProviderJson(res,'ChatGPT','OpenAI Responses API呼び出し失敗');
+      if(!res.ok||data.error) throw Object.assign(new Error(data.error?.message||'OpenAI Responses API呼び出し失敗'),{status:res.status,provider:'ChatGPT',body:JSON.stringify(data)});
+      const parsed=parseOpenAIResponse(data,req,url); req.onDelta(parsed.text); if(req.onSources)req.onSources(parsed.sources);if(req.onToolDetails)req.onToolDetails(parsed.toolDetails);if(parsed.media.length&&req.onMedia)req.onMedia(parsed.media); return parsed;
+    }
+    if(!res.ok) throw await providerError(res,'ChatGPT');
+    let terminal=false, finalResponse=null;
+    await consumeSSE(res,(event)=>{
+      const type=event?.type;
+      if(type==='error') throw makeProviderStreamError({provider:'ChatGPT',status:502,body:event,message:event.message});
+      if(type==='response.failed') throw makeProviderStreamError({provider:'ChatGPT',status:502,body:event.response||event,message:event.response?.error?.message||'OpenAI Responses API呼び出し失敗'});
+      if(type==='response.output_text.delta' && event.delta){req.onDelta(event.delta);return;}
+      if(type==='response.completed'||type==='response.incomplete'){terminal=true;finalResponse=event.response||null;}
+    },resolveStreamIdleTimeout({thinking:!!req.slotConfig.thinking?.enabled,tools:!!(opts.webSearch||opts.codeExecution||opts.imageGeneration)}));
+    if(!terminal||!finalResponse) throw Object.assign(new Error('ストリームが途中で終了しました'),{status:502,provider:'ChatGPT',streamError:true});
+    const parsed=parseOpenAIResponse(finalResponse,req,url);
+    if(parsed.text!==undefined) { const accumulated=String(req.__streamText||''); if(parsed.text!==accumulated && req.onReplace) req.onReplace(parsed.text); }
+    if(req.onSources)req.onSources(parsed.sources);if(req.onToolDetails)req.onToolDetails(parsed.toolDetails);if(parsed.media.length&&req.onMedia)req.onMedia(parsed.media);
+    return parsed;
+  },
+
+
+  async sendTTS(req){
+    const model=req.model || 'gpt-4o-mini-tts';
+    const voice=req.slotConfig.openaiOptions?.ttsVoice || 'marin';
+    const format=req.slotConfig.openaiOptions?.ttsFormat || 'mp3';
+    const body={
+      model,
+      input:String(req.request.prompt||'').slice(0,4096),
+      voice,
+      response_format:format
+    };
+    const instructions=req.slotConfig.openaiOptions?.ttsInstructions;
+    if(instructions && model!=='tts-1' && model!=='tts-1-hd') body.instructions=instructions;
+    const base=(req.endpoint||'https://api.openai.com/v1/responses').replace(/\/(?:responses|chat\/completions)\/?$/,'');
+    const res=await fetchWithTimeout(`${base}/audio/speech`,{
+      method:'POST',signal:req.signal,
+      headers:{Authorization:`Bearer ${req.apiKey}`,'Content-Type':'application/json'},
+      body:JSON.stringify(body)
+    },LONG_REQUEST_TIMEOUT_MS);
+    if(!res.ok) throw await providerError(res,'ChatGPT');
+    const blob=await res.blob();
+    const dataUrl=await blobToDataUrl(blob);
+    if(req.onMedia) req.onMedia([{kind:'audio',mimeType:blob.type||`audio/${format}`,dataUrl}]);
+    req.onDelta('');
+    return {finishReason:'stop',usage:null};
+  },
+
+  async sendTranscription(req){
+    const audio=(req.request.attachments||[]).find(a=>a.isAudio);
+    if(!audio) throw Object.assign(new Error('文字起こしには音声ファイルを添付してください。'),{status:400,provider:'ChatGPT'});
+    const blob=await dataUrlToBlob(audio.data,audio.mimeType||'audio/webm');
+    const form=new FormData();
+    form.append('file',blob,audio.name||`audio.${extensionFromMime(audio.mimeType||'audio/webm')}`);
+    form.append('model',req.model||'gpt-transcribe');
+    const language=req.slotConfig.openaiOptions?.transcriptionLanguage;
+    if(language) form.append('language',language);
+    const base=(req.endpoint||'https://api.openai.com/v1/responses').replace(/\/(?:responses|chat\/completions)\/?$/,'');
+    const res=await fetchWithTimeout(`${base}/audio/transcriptions`,{
+      method:'POST',signal:req.signal,
+      headers:{Authorization:`Bearer ${req.apiKey}`},
+      body:form
+    },LONG_REQUEST_TIMEOUT_MS);
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok||data.error) throw Object.assign(
+      new Error(data.error?.message||'OpenAI文字起こしAPI呼び出し失敗'),
+      {status:res.status,provider:'ChatGPT',body:JSON.stringify(data)}
+    );
+    req.onDelta(data.text||'');
+    return {finishReason:'stop',usage:null};
+  },
+
+  async sendImage(req){
+    const imageOpts=req.slotConfig.openaiOptions||{};
+    const imageAttachments=(req.request.attachments||[]).filter(a=>a.isImage);
+    const outputFormat=imageOpts.imageFormat||'png';
+    const requestedBackground=imageOpts.imageBackground||'auto';
+    const background=requestedBackground;
+    const body={
+      model:req.model||'gpt-image-2.5-flare',
+      prompt:String(req.request.prompt||'').slice(0,32000),
+      size:imageOpts.imageSize||'auto',
+      quality:imageOpts.imageQuality||'auto',
+      background,
+      output_format:(background==='transparent' && outputFormat==='jpeg') ? 'png' : outputFormat
+    };
+    if(imageAttachments.length) body.images=imageAttachments.map(a=>({image_url:a.data}));
+    const base=(req.endpoint||'https://api.openai.com/v1/responses').replace(/\/(?:responses|chat\/completions)\/?$/,'');
+    const imagesBase=`${base}/images`;
+    if(!/^gpt-image-/.test(req.model||'')) throw Object.assign(new Error('OpenAIの画像出力にはGPT Imageモデル（例: gpt-image-2.5-flare）を指定してください。現在のモデル名: '+(req.model||'(未設定)')),{status:400,provider:'ChatGPT',imageModelConfigError:true});
+    const endpoint=imageAttachments.length ? `${imagesBase}/edits` : `${imagesBase}/generations`;
+    const res=await fetchWithTimeout(endpoint,{
+      method:'POST',signal:req.signal,
+      headers:{Authorization:`Bearer ${req.apiKey}`,'Content-Type':'application/json'},
+      body:JSON.stringify(body)
+    },LONG_REQUEST_TIMEOUT_MS);
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok||data.error) throw Object.assign(
+      new Error(data.error?.message||'OpenAI Images API呼び出し失敗'),
+      {status:res.status,provider:'ChatGPT',body:JSON.stringify(data)}
+    );
+    const media=[];
+    for(const item of data.data||[]){
+      if(item.b64_json){
+        const fmt=body.output_format||'png';
+        media.push({kind:'image',mimeType:`image/${fmt}`,dataUrl:`data:image/${fmt};base64,${item.b64_json}`});
+      } else if(item.url){
+        const fmt=body.output_format||'png'; media.push({kind:'image',mimeType:`image/${fmt}`,uri:item.url});
+      }
+    }
+    if(media.length && req.onMedia) req.onMedia(media);
+    req.onDelta(data.data?.[0]?.revised_prompt ? `\n${data.data[0].revised_prompt}` : '');
+    return {finishReason:'stop',usage:data.usage||null};
   }
 };
+
 const ClaudeAdapter={
   id:'anthropic', capabilities:ADAPTER_CAPABILITIES.anthropic,
   async send(req){
@@ -4063,30 +4525,34 @@ const ContextCacheStrategy={mode:'provider-native',getManifest(){return {mode:th
 const ContextCompression={summarize(){throw new Error('Context CompressionはPhase B拡張点です。Canonical Conversationは破壊しません。');}};
 
 /* Phase 1 persistence */
-function saveSlotConfig(){const out={};for(const service of SERVICES){out[service]={};for(const slot of SLOTS){const m=AppState.modelConfig[service].models[slot];out[service][slot]={name:m.name,contextStrategy:m.contextStrategy,outputModality:m.outputModality,transport:m.transport,maxOutputTokens:m.maxOutputTokens,thinking:cloneJson(m.thinking),recentTurns:m.recentTurns,geminiOptions:cloneJson(m.geminiOptions||undefined)};}}localStorage.setItem('favhub_slot_config',JSON.stringify(out));}
+function saveSlotConfig(){const out={};for(const service of SERVICES){out[service]={};for(const slot of SLOTS){const m=AppState.modelConfig[service].models[slot];out[service][slot]={name:m.name,contextStrategy:m.contextStrategy,outputModality:m.outputModality,transport:m.transport,maxOutputTokens:m.maxOutputTokens,thinking:cloneJson(m.thinking),recentTurns:m.recentTurns,geminiOptions:cloneJson(m.geminiOptions||undefined),openaiOptions:cloneJson(m.openaiOptions||undefined)};}}localStorage.setItem('favhub_slot_config',JSON.stringify(out));}
 function loadSlotConfig(){const raw=safeJSONParse('favhub_slot_config',null);const legacyInteraction=localStorage.getItem('favhub_gemini_interaction_id_enabled')==='true';if(!raw){if(legacyInteraction){for(const slot of SLOTS){AppState.modelConfig.Gemini.models[slot].contextStrategy='Provider';}localStorage.removeItem('favhub_gemini_interaction_id_enabled');}ensureSlotConfigsInMemory();return;}const diagnostics=[];for(const service of SERVICES)for(const slot of SLOTS){const src=raw?.[service]?.[slot];if(src){const n=normalizeSlotConfig(src,AppState.modelConfig[service].provider,diagnostics);Object.assign(AppState.modelConfig[service].models[slot],n);if(typeof src.name==='string'&&src.name.trim())AppState.modelConfig[service].models[slot].name=src.name.trim();}}if(legacyInteraction){for(const slot of SLOTS){if(AppState.modelConfig.Gemini.models[slot].contextStrategy==='Auto')AppState.modelConfig.Gemini.models[slot].contextStrategy='Provider';}localStorage.removeItem('favhub_gemini_interaction_id_enabled');}if(diagnostics.length)console.warn('SlotConfig migration:',diagnostics);ensureSlotConfigsInMemory();}
-const legacyLoadPersistedModelNames=loadPersistedModelNames;
-loadPersistedModelNames=function(){legacyLoadPersistedModelNames();loadSlotConfig();ensureSlotConfigsInMemory();};
-const legacySaveModelConfig=saveModelConfig;
-saveModelConfig=function(){ensureSlotConfigsInMemory();saveSlotConfig();};
 
 function slotIdFor(service,slot){return `${service}:${slot}`;}
 function getSlotConfig(service,slot){ensureSlotConfigsInMemory();return AppState.modelConfig[service].models[slot];}
 function buildIdentity(service){return {persona:AppState.systemPrompts[service]||'',customInstructions:'',responseStyle:'',behavioralRules:[]};}
 
 /* Phase 2: StreamFilter */
-const StreamFilter={visible(raw){const s=String(raw||'');const i=s.indexOf(HCONTEXT_DELIMITER);return (i<0?s:s.slice(0,i)).trimEnd();},stripForConversation(raw){return this.visible(raw);}};
+const StreamFilter={visible(raw,opts={}){
+    let s=String(raw||'');const i=s.indexOf(HCONTEXT_DELIMITER);
+    if(i>=0)s=s.slice(0,i);
+    else if(opts.streaming){
+      // ストリーミング中は区切り文字が途中まで届いた状態（例: '@@@HCON'）で表示に漏れないよう、末尾の部分一致を隠す
+      for(let k=Math.min(s.length,HCONTEXT_DELIMITER.length-1);k>0;k--){if(s.endsWith(HCONTEXT_DELIMITER.slice(0,k))){s=s.slice(0,-k);break;}}
+    }
+    return s.trimEnd();},stripForConversation(raw){return this.visible(raw);}};
 
 /* Phase 2/3: RequestOrchestrator */
 const RequestOrchestrator={
-  async send({service,slot,apiKey,text,attachments,ui}){
+  async send({service,slot,apiKey,text,attachments,ui,signal,chatId=AppState.CurrentChatId,epoch=AppState.requestEpoch}){
+    const stale=()=>AppState.requestEpoch!==epoch;
     const modelDef=getSlotConfig(service,slot); const adapterId=AppState.modelConfig[service].provider; const adapter=ProviderRegistry.get(adapterId);
     const contextMode=CONTEXT_MODES.includes(AppState.AIContext)?AppState.AIContext:'Deep';
     let strategy=ContextManager.resolveStrategy(adapterId,modelDef.contextStrategy);
     if(adapterId==='anthropic'&&strategy==='Provider') throw Object.assign(new Error('ClaudeはProvider Strategyをサポートしません。'),{provider:'ClaudeCode',configError:true});
-    const canonical=await ContextManager.load(AppState.CurrentChatId); canonical.identity=buildIdentity(service); canonical.project=normalizeProjectContext(AppState.hierarchicalContext); canonical.request={currentPrompt:text,attachments:cloneJson(attachments),toolResults:[]};
+    const canonical=await ContextManager.load(chatId); canonical.identity=buildIdentity(service); canonical.project=normalizeProjectContext(AppState.hierarchicalContext); canonical.request={currentPrompt:text,attachments:cloneJson(attachments),toolResults:[]};
     const useProviderState = strategy==='Provider' && contextMode!=='Single';
-    const providerState=useProviderState ? await ProviderStateManager.get(AppState.CurrentChatId,slotIdFor(service,slot)) : null;
+    const providerState=useProviderState ? await ProviderStateManager.get(chatId,slotIdFor(service,slot)) : null;
     const projection=ContextManager.buildProjection({adapterId,contextMode,strategy,slotConfig:modelDef,canonical,request:{prompt:text,attachments},providerState:useProviderState?providerState:null});
     const effectiveProviderState = useProviderState && projection.seedNeeded && providerState
       ? {...providerState,data:{...(providerState.data||{}),interactionId:null,previousResponseId:null}}
@@ -4095,29 +4561,44 @@ const RequestOrchestrator={
     const diagnostic=createRequestDiagnostic({service,model:modelDef.name,mode:contextMode,interactionIdEnabled:adapterId==='gemini'&&strategy==='Provider',flexEnabled:false,prompt:text});
     AppState.lastRequestResult=null;
     let output='';
-    const onDelta=d=>{output+=d;AppState.CurrentAIOutput=output;ui.renderResponseText(StreamFilter.visible(output));};
-    const onMedia=m=>{AppState.CurrentAIOutputMedia=Array.isArray(m)?m:[];};
-    const request={endpoint:AppState.modelConfig[service].endpoint,apiKey,model:modelDef.name,adapterId,systemPrompt,projection,request:{prompt:text,attachments},slotConfig:modelDef,providerState:effectiveProviderState,providerOptions:(adapterId==='gemini' ? {...(modelDef.geminiOptions||{})} : {}),signal:AppState.abortController.signal,onDelta,onMedia,onInteractionId:(id)=>{if(id)AppState.GeminiInteractionId=id;}};
+    let responseSources=[];
+    let responseToolDetails=[];
+    let responseWarnings=[];
+    const renderToolDetails=()=>{responseToolDetails=[...responseWarnings,...responseToolDetails.filter(d=>d?.title!=='OpenAI添付・ツールの注意')];if(stale())return;ui.renderResponseToolDetails(responseToolDetails);};
+    let waitingStopped=false;
+    const onDelta=d=>{output+=d;if(stale())return;AppState.CurrentAIOutput=output;if(!waitingStopped){waitingStopped=true;WaitingTextManager.stop();ui.setWaitingText('');}ui.scheduleStreamRender(output);request.__streamText=output;};
+    const onReplace=text=>{output=String(text||'');if(stale())return;AppState.CurrentAIOutput=output;ui.flushStreamRender(output);request.__streamText=output;};
+    const onSources=src=>{responseSources=Array.isArray(src)?src:[];if(stale())return;ui.renderResponseSources(responseSources);};
+    const onToolDetails=details=>{responseToolDetails=Array.isArray(details)?details:[];renderToolDetails();};
+    const onWarning=message=>{responseWarnings.push({title:'OpenAI添付・ツールの注意',text:String(message||'')});renderToolDetails();};
+    let responseMedia=[];
+    const onMedia=m=>{responseMedia=Array.isArray(m)?m:[];if(stale())return;AppState.CurrentAIOutputMedia=responseMedia;};
+    const request={endpoint:AppState.modelConfig[service].endpoint,apiKey,model:modelDef.name,adapterId,systemPrompt,projection,request:{prompt:text,attachments},slotConfig:modelDef,providerState:effectiveProviderState,providerOptions:(adapterId==='gemini'
+      ? {...(modelDef.geminiOptions||{})}
+      : adapterId==='openai'
+      ? {...(modelDef.openaiOptions||{})}
+      : {}),signal,onDelta,onReplace,onMedia,onSources,onToolDetails,onWarning,onInteractionId:(id)=>{if(id&&!stale())AppState.GeminiInteractionId=id;}};
     let providerResponse;
     try{providerResponse=await adapter.send(request);}
     catch(err){throw normalizeProviderError(err);}
+    if(!stale()) ui.flushStreamRender(output);
     markRequestDiagnostic(diagnostic,'response_received',{status:'response-received',textReceived:!!String(output).trim(),finishReason:providerResponse?.finishReason||null,usage:providerResponse?.usage||null,projectionType:projection.projectionType,contextStrategy:projection.strategy,outputModality:modelDef.outputModality});
-    if(providerResponse?.finishReason==='length'||providerResponse?.finishReason==='max_tokens'||providerResponse?.finishReason==='max_tokens_reached') diagnostic.contextUpdateSkipped='finishReason';
+    if(isTruncatedFinishReason(providerResponse?.finishReason)) diagnostic.contextUpdateSkipped='finishReason';
     const body=StreamFilter.stripForConversation(output);
     const contextUpdate=ContextManager.extractContextUpdate({contextMode,response:output,finishReason:providerResponse?.finishReason});
     let canonicalAfter=cloneJson(canonical);
     if(contextUpdate){
-      const updatedProject=await ContextManager.applyContextUpdate(AppState.CurrentChatId,contextUpdate,diagnostic,{persist:false});
+      const updatedProject=await ContextManager.applyContextUpdate(chatId,contextUpdate,diagnostic,{persist:false});
       canonicalAfter.project=cloneJson(updatedProject||canonicalAfter.project||cloneDefaultProjectContext());
       canonicalAfter.projectRevision=(Number.isFinite(Number(canonicalAfter.projectRevision))?Number(canonicalAfter.projectRevision):0)+1;
       canonicalAfter.cacheManifest=ContextManifest.build({canonical:canonicalAfter,projection:null});
     }
     const providerStateWrites=[];
-    if(useProviderState && providerResponse?.finishReason && providerResponse.finishReason!=='length' && providerResponse.finishReason!=='max_tokens' && providerResponse.finishReason!=='max_tokens_reached'){
-      if(adapterId==='gemini'&&providerResponse.interactionId) providerStateWrites.push(ProviderStateManager.build(adapterId,AppState.CurrentChatId,slotIdFor(service,slot),modelDef.name,strategy,{type:'interaction',interactionId:providerResponse.interactionId},canonicalAfter.conversation.messages.length+2));
-      if(adapterId==='openai'&&providerResponse.previousResponseId) providerStateWrites.push(ProviderStateManager.build(adapterId,AppState.CurrentChatId,slotIdFor(service,slot),modelDef.name,strategy,{type:'response',previousResponseId:providerResponse.previousResponseId,conversationId:null},canonicalAfter.conversation.messages.length+2));
+    if(useProviderState && providerResponse?.finishReason && !isTruncatedFinishReason(providerResponse.finishReason)){
+      if(adapterId==='gemini'&&providerResponse.interactionId) providerStateWrites.push(ProviderStateManager.build(adapterId,chatId,slotIdFor(service,slot),modelDef.name,strategy,{type:'interaction',interactionId:providerResponse.interactionId},canonicalAfter.conversation.messages.length+2));
+      if(adapterId==='openai'&&providerResponse.previousResponseId) providerStateWrites.push(ProviderStateManager.build(adapterId,chatId,slotIdFor(service,slot),modelDef.name,strategy,{type:'response',previousResponseId:providerResponse.previousResponseId,conversationId:null},canonicalAfter.conversation.messages.length+2));
     }
-    return {body,media:AppState.CurrentAIOutputMedia||[],providerResponse,projection,providerState:useProviderState?providerState:null,providerStateWrites,diagnostic,canonical:canonicalAfter};
+    return {body,media:responseMedia,sources:responseSources,toolDetails:responseToolDetails,providerResponse,projection,providerState:useProviderState?providerState:null,providerStateWrites,diagnostic,canonical:canonicalAfter};
   }
 };
 
@@ -4127,44 +4608,79 @@ UI.handleSend=async function(){
   const input=document.getElementById('user-input');const text=input.value.trim();if(!text&&AppState.attachedFiles.length===0)return;
   const service=AppState.CurrentAIModel.service,slot=AppState.CurrentAIModel.slot;const apiKey=AppState.keys[service]||await getSecure(`apiKey.${service}`);if(!apiKey){this.populateApiKeysForm();openModal('apikeys-modal');return;}AppState.keys[service]=apiKey;
   const modelDef=getSlotConfig(service,slot);const adapterId=AppState.modelConfig[service].provider;const strategy=ContextManager.resolveStrategy(adapterId,modelDef.contextStrategy);
-  if(modelDef.outputModality!=='text'&&strategy!=='Direct'&&strategy!=='Provider'){
-    // 非テキスト出力はProjectionを注入しないが、明示された設定値で動作する。
+  if(adapterId==='openai' && modelDef.outputModality==='image' && !/^gpt-image-/.test(modelDef.name||'')){
+    setRequestState('Failed');syncRequestControls();this.renderResponseText(`⚠️ 【設定エラー】\n画像出力にはGPT Imageモデル（gpt-image-*）を指定してください。現在: ${modelDef.name||'(未設定)'}`);return;
   }
   // Gemini の Provider / tts / transcribe は GeminiAdapter.send が自動で Interactions API へ送るため、
   // transport=interactions を要求する旧ガードは廃止した。
   if(adapterId==='anthropic'&&modelDef.contextStrategy==='Provider'){
     setRequestState('Failed');syncRequestControls();this.renderResponseText('⚠️ 【設定エラー】\nClaudeではProvider Strategyを選択できません。FavHubまたはDirectを選択してください。');return;
   }
-  clearImmersiveTimer();ExitImmersiveView();AppState.CurrentRequestContent=text;AppState.CurrentAIOutput='';AppState.CurrentAIOutputMedia=[];setRequestState('Processing');StartIllustrationProcessing();this.syncOutputPanel();
+  // 送信開始時点のチャットと世代を固定する。以降の書き込みはこのchatIdに対してだけ行い、
+  // 「＋」や履歴復元で別チャットへ移った後は、画面・メモリ状態には一切触れない。
+  const chatId=AppState.CurrentChatId;const epoch=AppState.requestEpoch||0;const isStale=()=>(AppState.requestEpoch||0)!==epoch;
+  const baseHistory=cloneJson(AppState.conversationHistory||[]);
+  clearImmersiveTimer();ExitImmersiveView();AppState.CurrentRequestContent=text;AppState.CurrentAIOutput='';AppState.CurrentAIOutputMedia=[];this.renderResponseSources([]);this.renderResponseToolDetails([]);setRequestState('Processing');StartIllustrationProcessing();this.syncOutputPanel();
   const sendBtn=document.getElementById('send-btn'),stopBtn=document.getElementById('stop-btn'),regenerateBtn=document.getElementById('regenerate-btn');sendBtn.disabled=true;stopBtn.hidden=false;stopBtn.disabled=false;regenerateBtn.disabled=true;regenerateBtn.classList.add('spinning');
-  WaitingTextManager.start(currentServiceWaitingTexts(),t=>this.setWaitingText(t));startImmersiveTimer();AppState.abortController=new AbortController();
+  const controller=new AbortController();AppState.abortController=controller;
+  WaitingTextManager.start(currentServiceWaitingTexts(),t=>this.setWaitingText(t));startImmersiveTimer();
   const attachments=[...AppState.attachedFiles];let diagnostic=null;
+  const makeUserMsg=(now)=>({role:'user',content:text,provider:service,timestamp:now,...(attachments.length?{attachmentNames:attachments.map(a=>a.name).filter(Boolean)}:{})});
+  const logBase=(now,turnHistory,output,mediaRefs)=>({RequestId:chatId,RequestTitle:(turnHistory[0]?.content||text).slice(0,40)||'無題',RequestDate:turnHistory[0]?.timestamp||now,RequestUpdatedDate:now,RequestContent:text,AIOutput:output,AIOutputMedia:cloneJson(mediaRefs||[]),service,slot,turnCount:turnHistory.length,contextStrategy:modelDef.contextStrategy,outputModality:modelDef.outputModality,transport:modelDef.transport,canonicalSource:'CanonicalStore'});
   try{
-    const result=await RequestOrchestrator.send({service,slot,apiKey,text,attachments,ui:this});diagnostic=result.diagnostic;WaitingTextManager.stop();this.setWaitingText('');stopBtn.hidden=true;setRequestState('ResponseReceived');syncRequestControls();
-    const body=result.body,media=result.media;const now=new Date().toISOString();markRequestDiagnostic(diagnostic,'media_detected',{mediaReceived:media.length>0,mediaCount:media.length});setRequestState('Rendering');syncRequestControls();markRequestDiagnostic(diagnostic,'render_start');
-    const preparedMedia=await prepareMediaItems(AppState.CurrentChatId, diagnostic?.requestId||GenerateId('turn'), media);
+    const result=await RequestOrchestrator.send({service,slot,apiKey,text,attachments,ui:this,signal:controller.signal,chatId,epoch});diagnostic=result.diagnostic;
+    const body=result.body,media=result.media;const now=new Date().toISOString();
+    if(!isStale()){WaitingTextManager.stop();this.setWaitingText('');stopBtn.hidden=true;setRequestState('ResponseReceived');syncRequestControls();markRequestDiagnostic(diagnostic,'media_detected',{mediaReceived:media.length>0,mediaCount:media.length});setRequestState('Rendering');syncRequestControls();markRequestDiagnostic(diagnostic,'render_start');}
+    // 永続化に必要な処理は画面状態に触れずに先に済ませる（途中で別チャットへ移動されても、このチャットに正しく保存される）
+    const preparedMedia=await prepareMediaItems(chatId, diagnostic?.requestId||GenerateId('turn'), media);
     const mediaRefs=preparedMedia.refs;
-    AppState.conversationHistory.push({role:'user',content:text,provider:service,timestamp:now});AppState.conversationHistory.push({role:'assistant',content:body,provider:service,timestamp:now,media:mediaRefs});
-    const canonicalToSave=cloneJson(result.canonical||{});canonicalToSave.chatId=AppState.CurrentChatId;canonicalToSave.conversation={...(canonicalToSave.conversation||{}),messages:cloneJson(AppState.conversationHistory)};canonicalToSave.request={currentPrompt:'',attachments:[],toolResults:[]};canonicalToSave.cacheManifest=ContextManifest.build({canonical:canonicalToSave,projection:null});
-    const commitResult=await CanonicalStore.saveTurnWithRecovery({context:canonicalToSave,messages:AppState.conversationHistory,mediaRecords:preparedMedia.records,providerStates:result.providerStateWrites||[],recoveryKey:diagnostic?.requestId||GenerateId('turn')});
+    const turnHistory=[...baseHistory,makeUserMsg(now),{role:'assistant',content:body,provider:service,timestamp:now,media:mediaRefs}];
+    const canonicalToSave=cloneJson(result.canonical||{});canonicalToSave.chatId=chatId;canonicalToSave.conversation={...(canonicalToSave.conversation||{}),messages:cloneJson(turnHistory)};canonicalToSave.request={currentPrompt:'',attachments:[],toolResults:[]};canonicalToSave.cacheManifest=ContextManifest.build({canonical:canonicalToSave,projection:null});
+    const commitResult=await CanonicalStore.saveTurnWithRecovery({context:canonicalToSave,messages:turnHistory,mediaRecords:preparedMedia.records,providerStates:result.providerStateWrites||[],recoveryKey:diagnostic?.requestId||GenerateId('turn')});
     if(!commitResult.committed){
       if(diagnostic) markRequestDiagnostic(diagnostic,'canonical_recovery_pending',{pendingKey:commitResult.pendingKey});
+      if(isStale())return;
+      AppState.conversationHistory=turnHistory;
       setRequestState('Failed'); syncRequestControls();
       this.renderResponseText(`${body}\n\n⚠️ 応答は取得済みですが、端末への保存が一時保留されています。再送は不要です。次回起動時に自動復旧を試みます。`);
       AppState.lastResponse=body; AppState.lastResponseMedia=media; AppState.lastRequestResult={status:'persistence-pending',body,media,pendingKey:commitResult.pendingKey};
       return;
     }
-    saveConversationHistory();this.renderHierarchicalContextDisplay();await this.renderResponseMedia(media.length ? [...media] : []);
-    if(media.length)markRequestDiagnostic(diagnostic,'media_rendered');AppState.lastResponse=body;localStorage.setItem('favhub_last_response',body);AppState.lastResponseMedia=media;displayRandomIllustration();await CompleteIllustrationTransition();setRequestState('Completed');clearImmersiveTimer();AppState.lastRequestResult={status:'success',body,media};markRequestDiagnostic(diagnostic,'completed',{status:'success'});syncRequestControls();
-    await SaveRequestLog({RequestId:AppState.CurrentChatId,RequestTitle:(AppState.conversationHistory[0]?.content||text).slice(0,40)||'無題',RequestDate:AppState.conversationHistory[0]?.timestamp||now,RequestUpdatedDate:now,RequestContent:text,AIOutput:body,AIOutputMedia:cloneJson(mediaRefs),service,slot,turnCount:AppState.conversationHistory.length,contextStrategy:modelDef.contextStrategy,outputModality:modelDef.outputModality,transport:modelDef.transport,canonicalSource:'CanonicalStore'});
+    await SaveRequestLog(logBase(now,turnHistory,body,mediaRefs));
+    if(isStale())return; // 別チャットへ移動済み：保存だけ完了させ、画面は触らない
+    AppState.conversationHistory=turnHistory;saveConversationHistory();
+    AppState.lastRequestAttachments=attachments.length?cloneJson(attachments):[];
+    // 認証付きURI（OpenAI container / code interpreter / Gemini file URI 等）は <img>/<video> が直接読めないため、
+    // 保存用にBlob化済みのものは、そのBlobから作ったObject URLで表示する。
+    revokeTrackedObjectUrls();
+    const displayMedia=media.map((item,i)=>{const rec=preparedMedia.records[i];if(item&&item.uri&&!item.dataUrl&&rec?.blob){return {...item,dataUrl:trackObjectUrl(URL.createObjectURL(rec.blob)),uri:undefined,mimeType:(item.mimeType&&item.mimeType!=='application/octet-stream')?item.mimeType:(rec.mimeType||item.mimeType)};}return item;});
+    this.renderHierarchicalContextDisplay();await this.renderResponseMedia(displayMedia.length ? [...displayMedia] : []);
+    if(displayMedia.length)markRequestDiagnostic(diagnostic,'media_rendered');
+    if(isStale())return;
+    AppState.lastResponse=body;localStorage.setItem('favhub_last_response',body);AppState.lastResponseMedia=displayMedia;displayRandomIllustration();await CompleteIllustrationTransition();
+    if(isStale())return;
+    setRequestState('Completed');clearImmersiveTimer();AppState.lastRequestResult={status:'success',body,media:displayMedia};markRequestDiagnostic(diagnostic,'completed',{status:'success'});syncRequestControls();
     input.value='';AppState.attachedFiles=[];this.renderAttachmentChips();autosize();
   }catch(error){
-    const mapped=MapProviderError(error);WaitingTextManager.stop();stopBtn.hidden=true;clearImmersiveTimer();appEl.dataset.illustrationState='Static';
+    if(isStale())return; // 「＋」や履歴復元による中断：新しいチャットの状態を触らない
+    const mapped=MapProviderError(error);this.flushStreamRender(AppState.CurrentAIOutput||'');WaitingTextManager.stop();stopBtn.hidden=true;clearImmersiveTimer();appEl.dataset.illustrationState='Static';
     if(diagnostic)failRequestDiagnostic(diagnostic,mapped.code==='ABORTED'?'abort':'api',error);AppState.lastRequestResult={status:mapped.code==='ABORTED'?'aborted':'error',error:mapped};
-    if(mapped.code==='ABORTED'){setRequestState('Interrupted');syncRequestControls();const visible=StreamFilter.stripForConversation(AppState.CurrentAIOutput||'');this.renderResponseText(visible);if(visible){const now=new Date().toISOString();const media=AppState.CurrentAIOutputMedia||[];const preparedMedia=await prepareMediaItems(AppState.CurrentChatId, diagnostic?.requestId||GenerateId('turn'), media);const mediaRefs=preparedMedia.refs;AppState.conversationHistory.push({role:'user',content:text,provider:service,timestamp:now});AppState.conversationHistory.push({role:'assistant',content:visible,provider:service,timestamp:now,media:mediaRefs});const canonicalToSave=await ContextManager.load(AppState.CurrentChatId);canonicalToSave.conversation={...(canonicalToSave.conversation||{}),messages:cloneJson(AppState.conversationHistory)};canonicalToSave.request={currentPrompt:'',attachments:[],toolResults:[]};canonicalToSave.cacheManifest=ContextManifest.build({canonical:canonicalToSave,projection:null});const commitResult=await CanonicalStore.saveTurnWithRecovery({context:canonicalToSave,messages:AppState.conversationHistory,mediaRecords:preparedMedia.records,providerStates:[],recoveryKey:diagnostic?.requestId||GenerateId('turn')});
-      if(!commitResult.committed){ if(diagnostic) markRequestDiagnostic(diagnostic,'canonical_recovery_pending',{pendingKey:commitResult.pendingKey}); this.renderResponseText(`${visible}\n\n⚠️ 中断した応答は取得済みですが、端末への保存が一時保留されています。次回起動時に自動復旧を試みます。`); return; }saveConversationHistory();this.renderResponseMedia(media.length ? [...media] : []);await SaveRequestLog({RequestId:AppState.CurrentChatId,RequestTitle:(AppState.conversationHistory[0]?.content||text).slice(0,40)||'無題',RequestDate:AppState.conversationHistory[0]?.timestamp||now,RequestUpdatedDate:now,RequestContent:text,AIOutput:visible,service,slot,turnCount:AppState.conversationHistory.length,canonicalSource:'CanonicalStore'});}}
+    if(mapped.code==='ABORTED'){
+      setRequestState('Interrupted');syncRequestControls();const visible=StreamFilter.stripForConversation(AppState.CurrentAIOutput||'');this.renderResponseText(visible);
+      if(visible){
+        const now=new Date().toISOString();const media=AppState.CurrentAIOutputMedia||[];
+        const preparedMedia=await prepareMediaItems(chatId, diagnostic?.requestId||GenerateId('turn'), media);const mediaRefs=preparedMedia.refs;
+        const turnHistory=[...baseHistory,makeUserMsg(now),{role:'assistant',content:visible,provider:service,timestamp:now,media:mediaRefs}];
+        const canonicalToSave=await ContextManager.load(chatId);canonicalToSave.conversation={...(canonicalToSave.conversation||{}),messages:cloneJson(turnHistory)};canonicalToSave.request={currentPrompt:'',attachments:[],toolResults:[]};canonicalToSave.cacheManifest=ContextManifest.build({canonical:canonicalToSave,projection:null});
+        const commitResult=await CanonicalStore.saveTurnWithRecovery({context:canonicalToSave,messages:turnHistory,mediaRecords:preparedMedia.records,providerStates:[],recoveryKey:diagnostic?.requestId||GenerateId('turn')});
+        if(!commitResult.committed){ if(diagnostic) markRequestDiagnostic(diagnostic,'canonical_recovery_pending',{pendingKey:commitResult.pendingKey}); if(!isStale()){AppState.conversationHistory=turnHistory;this.renderResponseText(`${visible}\n\n⚠️ 中断した応答は取得済みですが、端末への保存が一時保留されています。次回起動時に自動復旧を試みます。`);} return; }
+        await SaveRequestLog(logBase(now,turnHistory,visible,mediaRefs));
+        if(isStale())return;
+        AppState.conversationHistory=turnHistory;saveConversationHistory();this.renderResponseMedia(media.length ? [...media] : []);
+      }
+    }
     else {setRequestState('Failed');syncRequestControls();const suffix=error?.contextOverflow?'\n\n「recentTurns」を下げるか、新規チャットを作成してください。':'';this.renderResponseText((AppState.CurrentAIOutput?StreamFilter.visible(AppState.CurrentAIOutput)+'\n\n':'')+`⚠️ 【${service} エラー】\n${mapped.message}${suffix}`);}
-  }finally{AppState.abortController=null;}
+  }finally{if(AppState.abortController===controller)AppState.abortController=null;}
 };
 async function bootstrap() {
   // 旧バージョンで保存されていた古いendpoint入りのモデル設定は破棄し、モデル名だけを引き継ぐ
