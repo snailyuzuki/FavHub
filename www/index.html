@@ -278,8 +278,8 @@ button:disabled { opacity:.38; cursor:not-allowed; }
 .api-launcher-icon { width:52px; height:52px; display:grid; place-items:center; border:1px solid rgba(255,255,255,.18); border-radius:16px; background:rgba(255,255,255,.08); font-size:25px; }
 .api-launcher-message { font-size:14px; font-weight:700; }
 .api-launcher-url { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:10px; opacity:.62; }
-.api-console-open-btn { min-width:190px; margin-top:4px; }
-.api-launcher-note { max-width:520px; margin:2px 0 0; font-size:10px; line-height:1.6; opacity:.58; }
+.api-console-provider-links { width:min(100%, 420px); display:grid; grid-template-columns:1fr; gap:9px; margin-top:4px; }
+.api-console-provider-btn { width:100%; min-height:42px; }
 
 @media (max-width:480px) {
   .internal-browser-overlay { padding:12px; }
@@ -369,10 +369,12 @@ button:disabled { opacity:.38; cursor:not-allowed; }
     </div>
     <div class="api-launcher-body">
       <div class="api-launcher-icon">↗</div>
-      <div id="api-launcher-message" class="api-launcher-message">APIキーの確認・発行ページを開きます。ログイン後、APIキーを確認してFavHubの設定画面に戻ってください。</div>
-      <div id="api-launcher-url" class="api-launcher-url"></div>
-      <button type="button" id="api-console-open-btn" class="primary-btn api-console-open-btn">APIキー設定ページを開く</button>
-      <p class="api-launcher-note">このボタンはCapacitorの外部ブラウザ機能を優先して開きます。端末側で利用できない場合は、FavHubの画面内でそのページへ移動します。</p>
+      <div id="api-launcher-message" class="api-launcher-message">遷移したいAPIコンソールを選択してください。</div>
+      <div class="api-console-provider-links" aria-label="APIコンソールへのショートカット">
+        <button type="button" class="primary-btn api-console-provider-btn" data-api-console-service="ChatGPT">OpenAI APIコンソール</button>
+        <button type="button" class="primary-btn api-console-provider-btn" data-api-console-service="Gemini">Gemini APIコンソール</button>
+        <button type="button" class="primary-btn api-console-provider-btn" data-api-console-service="ClaudeCode">Claude APIコンソール</button>
+      </div>
     </div>
   </div>
 </div>
@@ -3513,19 +3515,20 @@ const UI = {
 };
 
 function openApiConsoleBrowser(url, service = '') {
-  if (!url) return;
   const overlay = document.getElementById('internal-browser-overlay');
   const title = document.getElementById('internal-browser-title');
   const message = document.getElementById('api-launcher-message');
-  const urlBox = document.getElementById('api-launcher-url');
-  const openBtn = document.getElementById('api-console-open-btn');
-  if (!overlay || !openBtn) return;
+  if (!overlay || !title || !message) return;
 
-  const serviceLabel = service || 'API';
-  title.textContent = `${serviceLabel} APIコンソール`;
-  message.textContent = `${serviceLabel} のAPIキーを確認・発行するページを開きます。ログイン後にAPIキーを設定し、FavHubへ戻ってください。`;
-  urlBox.textContent = url;
-  openBtn.onclick = () => openUrlViaCapacitorBrowser(url);
+  title.textContent = 'APIコンソール';
+  message.textContent = '遷移したいAPIコンソールを選択してください。';
+
+  overlay.querySelectorAll('[data-api-console-service]').forEach((btn) => {
+    const targetService = btn.dataset.apiConsoleService;
+    const targetUrl = DEFAULT_MODEL_CONFIG[targetService]?.apiConsoleUrl || AppState.modelConfig?.[targetService]?.apiConsoleUrl;
+    btn.disabled = !targetUrl;
+    btn.onclick = () => { if (targetUrl) openUrlViaCapacitorBrowser(targetUrl); };
+  });
 
   overlay.style.display = 'flex';
   overlay.setAttribute('aria-hidden', 'false');
@@ -3558,11 +3561,10 @@ async function openUrlViaCapacitorBrowser(url) {
 
 function closeApiConsoleBrowser() {
   const overlay = document.getElementById('internal-browser-overlay');
-  const openBtn = document.getElementById('api-console-open-btn');
   if (!overlay) return;
   overlay.style.display = 'none';
   overlay.setAttribute('aria-hidden', 'true');
-  if (openBtn) openBtn.onclick = null;
+  overlay.querySelectorAll('[data-api-console-service]').forEach((btn) => { btn.onclick = null; });
   document.body.style.overflow = '';
 }
 
