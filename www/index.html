@@ -1554,6 +1554,8 @@ const STREAMING_ENABLED = (() => {
   try { const raw = localStorage.getItem('favhub_streaming_enabled'); return raw === null ? true : raw !== 'false'; }
   catch { return true; }
 })();
+// ストリーミング対象の出力形式。'auto' もテキストを含みうるためSSEで受信する（画像/音声/動画/文字起こしは対象外）。
+const isStreamableModality = (m) => m === 'text' || m === 'auto';
 function resolveStreamIdleTimeout({ thinking=false, tools=false } = {}) {
   return (thinking || tools) ? STREAM_IDLE_TIMEOUT_LONG_MS : STREAM_IDLE_TIMEOUT_NORMAL_MS;
 }
@@ -1813,7 +1815,7 @@ const ProviderService = {
     // 混雑時は503/429で弾かれうるため、タイムアウトも専用の長めの値に切り替える）
     if (providerOptions.flexInference) bodyData.service_tier = 'flex';
     const geminiTimeout = resolveRequestTimeout({ modality:outputModality, thinking, tools:!!(providerOptions.searchGrounding||providerOptions.urlContext||providerOptions.codeExecution||providerOptions.mapsGrounding), flex:!!providerOptions.flexInference });
-    const streaming = STREAMING_ENABLED && outputModality === 'text';
+    const streaming = STREAMING_ENABLED && isStreamableModality(outputModality);
     const requestUrl = streaming ? `${endpoint}/${model}:streamGenerateContent?alt=sse` : url;
     const res = await fetchWithTimeout(requestUrl,{method:'POST',signal,...(streaming?{keepAbortAfterResponse:true}:{}),headers:{'Content-Type':'application/json','x-goog-api-key':apiKey,...(streaming?{Accept:'text/event-stream'}:{})},body:JSON.stringify(bodyData)},streaming?REQUEST_TIMEOUT_MS:geminiTimeout);
     if(!streaming){
@@ -1933,7 +1935,7 @@ const ProviderService = {
     // FLEX推論: Interactions APIでも同じservice_tierフィールドで指定できる
     if (providerOptions.flexInference) bodyData.service_tier = 'flex';
     const geminiInteractionTimeout = resolveRequestTimeout({ modality:outputModality, tools:!!(providerOptions.searchGrounding||providerOptions.urlContext||providerOptions.codeExecution||providerOptions.mapsGrounding), flex:!!providerOptions.flexInference });
-    const streaming = STREAMING_ENABLED && outputModality === 'text';
+    const streaming = STREAMING_ENABLED && isStreamableModality(outputModality);
     if(streaming) bodyData.stream=true;
     const requestUrl = streaming ? `${url}?alt=sse` : url;
     const res = await fetchWithTimeout(requestUrl,{method:'POST',signal,...(streaming?{keepAbortAfterResponse:true}:{}),headers:{'x-goog-api-key':apiKey,'Content-Type':'application/json',...(streaming?{Accept:'text/event-stream'}:{})},body:JSON.stringify(bodyData)},streaming?REQUEST_TIMEOUT_MS:geminiInteractionTimeout);
@@ -4391,7 +4393,7 @@ const OpenAIAdapter={
     }
     if(tools.length) body.tools=tools;
 
-    const streaming = STREAMING_ENABLED && req.slotConfig.outputModality === 'text';
+    const streaming = STREAMING_ENABLED && isStreamableModality(req.slotConfig.outputModality);
     if(streaming) body.stream=true;
     const res=await fetchWithTimeout(url,{method:'POST',signal:req.signal,...(streaming?{keepAbortAfterResponse:true}:{}),headers:{Authorization:`Bearer ${req.apiKey}`,'Content-Type':'application/json',...(streaming?{Accept:'text/event-stream'}:{})},body:JSON.stringify(body)},streaming?REQUEST_TIMEOUT_MS:resolveRequestTimeout({modality:req.slotConfig.outputModality,thinking:!!req.slotConfig.thinking?.enabled,tools:!!(opts.webSearch||opts.codeExecution||opts.imageGeneration)}));
     if(!streaming){
