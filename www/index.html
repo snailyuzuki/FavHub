@@ -1337,11 +1337,43 @@ function markRequestDiagnostic(log, phase, patch={}) {
   if (phase==='send_enabled') log.sendEnabledAt=now;
   Object.assign(log, patch, {lastPhase:phase}); persistRequestDiagnostic(log);
 }
+// 秘密情報（APIキー等）が診断ログやエクスポートJSONに混ざらないようにマスクする
+function maskSecretsInText(s) {
+  return String(s ?? '')
+    .replace(/sk-[A-Za-z0-9_\-]{8,}/g, 'sk-***')
+    .replace(/AIza[0-9A-Za-z_\-]{20,}/g, 'AIza***')
+    .replace(/(Bearer\s+)[A-Za-z0-9._\-]{8,}/gi, '$1***');
+}
+const DIAGNOSTIC_FAIL_STATUS_BY_PHASE = { render:'render-error', 'image-load':'render-error', abort:'aborted', stale:'abandoned', interrupted:'interrupted' };
 function failRequestDiagnostic(log, phase, error) {
   if (!log) return;
-  log.status=(phase==='render'||phase==='image-load')?'render-error':(error?.name==='TimeoutError'?'timeout':'api-error');
-  log.phase=phase; log.error={name:error?.name||'Error',status:error?.status??null,message:String(error?.message||error||'Unknown error').slice(0,500),timestamp:GetCurrentTimestamp()};
+  log.status=DIAGNOSTIC_FAIL_STATUS_BY_PHASE[phase]||(error?.name==='TimeoutError'?'timeout':'api-error');
+  log.phase=phase; log.failedAt=performance.now();
+  log.error={name:error?.name||'Error',status:error?.status??null,provider:error?.provider??null,
+    message:maskSecretsInText(error?.message||error||'Unknown error').slice(0,500),
+    body:error?.body?maskSecretsInText(error.body).slice(0,1000):null,
+    timestamp:GetCurrentTimestamp()};
   persistRequestDiagnostic(log);
+}
+// 起動時に、前回セッションで「処理中」のまま残ったログ（アプリ終了・再読み込み等）を失敗として確定させる
+async function finalizeOrphanedDiagnostics() {
+  try {
+    const db=await openRequestDb();
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction('diagnostics','readwrite'); const store=tx.objectStore('diagnostics'); const req=store.getAll();
+      req.onsuccess=()=>{
+        const ts=GetCurrentTimestamp();
+        for(const d of (req.result||[])){
+          if(!d||d.pendingKey) continue; // 保存の復旧待ちは復旧処理側で扱う
+          if(d.status!=='processing'&&d.status!=='response-received') continue;
+          store.put({...d,status:'interrupted',phase:'app_restart',lastPhase:'app_restart',
+            error:{name:'InterruptedError',status:null,provider:d.provider||null,message:'アプリの終了・再読み込み等により、処理の完了を確認できませんでした。',body:null,timestamp:ts}});
+        }
+      };
+      req.onerror=()=>reject(req.error);
+      tx.oncomplete=resolve; tx.onerror=()=>reject(tx.error); tx.onabort=()=>reject(tx.error);
+    });
+  } catch(e) { console.warn('未完了の診断ログの整理に失敗しました。', e); }
 }
 async function persistRequestDiagnostic(log) { try { await archTx('diagnostics', 'readwrite', store=>store.put({...log})); } catch(e) { console.warn('診断ログの保存に失敗しました。',e); } }
 const DIAGNOSTICS_MAX_ENTRIES = 200;
@@ -1640,10 +1672,35 @@ async function consumeSSE(response, onEvent, idleTimeoutMs = SSE_IDLE_TIMEOUT_MS
     throw err;
   }
 }
+// APIエラー本文から「何がダメだったか」を取り出す（OpenAI / Gemini / Claude の error オブジェクトに対応）
+function extractApiErrorDetail(body) {
+  const raw = String(body || '').trim();
+  if (!raw) return '';
+  let detail = '';
+  try {
+    let json = JSON.parse(raw);
+    if (Array.isArray(json)) json = json[0];
+    const err = json?.error ?? json;
+    if (typeof err === 'string') detail = err;
+    else if (err && typeof err === 'object') {
+      detail = String(err.message || err.detail || json?.message || '').trim();
+      const extras = [];
+      if (err.param) extras.push(`param: ${err.param}`);
+      if (err.code) extras.push(`code: ${err.code}`);
+      else if (err.type) extras.push(`type: ${err.type}`);
+      else if (err.status) extras.push(`status: ${err.status}`);
+      if (extras.length) detail += ` [${extras.join(', ')}]`;
+    }
+  } catch {
+    detail = /^\s*</.test(raw) ? '' : raw; // HTMLエラーページは載せない
+  }
+  return maskSecretsInText(detail.replace(/\s+/g, ' ').trim()).slice(0, 300);
+}
 async function providerError(response, provider) {
   let body = ''; try { body = await response.text(); } catch {}
-  const e = new Error(`${provider} API error (${response.status})`);
-  e.status = response.status; e.provider = provider; e.body = body;
+  const detail = extractApiErrorDetail(body);
+  const e = new Error(`${provider} API error (${response.status})${detail ? `: ${detail}` : ''}`);
+  e.status = response.status; e.provider = provider; e.body = body; e.apiErrorDetail = detail;
   return e;
 }
 function extensionFromMime(mime=''){
@@ -2673,7 +2730,7 @@ const UI = {
     const lastTurnMedia = [...sessionMedia].filter(x => x.turnIndex === Math.max(-1,...sessionMedia.map(y=>y.turnIndex))).map(x=>({...x}));
     AppState.CurrentAIOutputMedia = lastTurnMedia;
     AppState.lastResponseMedia = sessionMedia;
-    this.renderResponseMedia(sessionMedia, { silent: true });
+    this.renderResponseMedia(sessionMedia, { silent: true }); this.renderResponseSources([]); this.renderResponseToolDetails([]); // 前チャットのSources/ツールログを持ち越さない
     AppState.lastResponse = req.AIOutput || '';
     localStorage.setItem('favhub_last_response', AppState.lastResponse);
     document.getElementById('output-panel').classList.add('expanded');
@@ -3066,26 +3123,33 @@ const UI = {
         if (!Camera?.getPhoto) throw new Error('Capacitor Cameraが利用できません。');
         const photo = await Camera.getPhoto({
           source: 'CAMERA',
-          resultType: 'DATA_URL',
+          resultType: 'dataUrl', // Capacitor Cameraの正式値。'DATA_URL'は無効値でbase64にフォールバックされ、dataUrlが返らない
           quality: 85,
           width: 1600,
           height: 1600,
           correctOrientation: true,
           saveToGallery: false,
         });
-        if (!photo?.dataUrl) throw new Error('撮影画像を取得できませんでした。');
-        const blob = await (await fetch(photo.dataUrl)).blob();
-        const mimeType = photo.format ? `image/${photo.format}` : 'image/jpeg';
-        const file = new File([blob], `camera_${Date.now()}.jpg`, { type: mimeType });
+        const fmt = photo?.format || 'jpeg';
+        const dataUrl = photo?.dataUrl || (photo?.base64String ? `data:image/${fmt};base64,${photo.base64String}` : '');
+        if (!dataUrl) throw new Error('撮影画像を取得できませんでした。');
+        const blob = await (await fetch(dataUrl)).blob();
+        const mimeType = blob.type || `image/${fmt}`;
+        const ext = fmt === 'jpeg' ? 'jpg' : fmt;
+        const file = new File([blob], `camera_${Date.now()}.${ext}`, { type: mimeType });
         await handleAttachedFile(file);
       } catch (error) {
+        const msg = String(error?.message || error || '');
+        if (/cancel/i.test(msg)) return; // ユーザーによるキャンセルは無視
         console.error('ネイティブカメラ起動エラー:', error);
-        if (error?.message && !/cancel/i.test(String(error.message))) {
-          alert('カメラを起動できませんでした。カメラ権限を確認してください。');
+        if (/denied|permission/i.test(msg)) {
+          alert('カメラの権限が許可されていません。端末の設定でFavHubのカメラ権限を許可してください。');
+        } else {
+          alert(`カメラを利用できませんでした。\n${msg}`);
         }
       }
     };
-
+    
     attachList.addEventListener('click', (e) => {
       const optBtn = e.target.closest('[data-attach-type]'); if (!optBtn) return;
       closeAttachList();
@@ -3501,7 +3565,7 @@ const UI = {
       AppState.attachedFiles=[]; AppState.lastRequestResult=null; AppState.requestDiagnostics=null;
       const input=document.getElementById('user-input'); if(input) input.value=''; if(typeof autosize==='function') autosize();
       if(typeof this.renderAttachmentChips==='function') this.renderAttachmentChips();
-      if(typeof this.renderResponseMedia==='function') this.renderResponseMedia([]);
+      if(typeof this.renderResponseMedia==='function') this.renderResponseMedia([]); this.renderResponseSources([]); this.renderResponseToolDetails([]);
       const outputPanel=document.getElementById('output-panel'); if(outputPanel) outputPanel.classList.remove('expanded');
       setRequestState('Ready');
       if(typeof this.syncOutputPanel==='function') this.syncOutputPanel({restart:true});
@@ -4548,7 +4612,7 @@ const StreamFilter={visible(raw,opts={}){
 
 /* Phase 2/3: RequestOrchestrator */
 const RequestOrchestrator={
-  async send({service,slot,apiKey,text,attachments,ui,signal,chatId=AppState.CurrentChatId,epoch=AppState.requestEpoch}){
+  async send({service,slot,apiKey,text,attachments,ui,signal,chatId=AppState.CurrentChatId,epoch=AppState.requestEpoch,onDiagnostic}){
     const stale=()=>AppState.requestEpoch!==epoch;
     const modelDef=getSlotConfig(service,slot); const adapterId=AppState.modelConfig[service].provider; const adapter=ProviderRegistry.get(adapterId);
     const contextMode=CONTEXT_MODES.includes(AppState.AIContext)?AppState.AIContext:'Deep';
@@ -4563,6 +4627,7 @@ const RequestOrchestrator={
       : (useProviderState ? providerState : null);
     const systemPrompt=ContextManager.buildSystemPrompt(projection,canonical.identity.persona);
     const diagnostic=createRequestDiagnostic({service,model:modelDef.name,mode:contextMode,interactionIdEnabled:adapterId==='gemini'&&strategy==='Provider',flexEnabled:false,prompt:text});
+    if(typeof onDiagnostic==='function')onDiagnostic(diagnostic); // 送信が例外で終わっても、呼び出し側が診断ログへ失敗を記録できるようにする
     AppState.lastRequestResult=null;
     let output='';
     let responseSources=[];
@@ -4632,7 +4697,7 @@ UI.handleSend=async function(){
   const makeUserMsg=(now)=>({role:'user',content:text,provider:service,timestamp:now,...(attachments.length?{attachmentNames:attachments.map(a=>a.name).filter(Boolean)}:{})});
   const logBase=(now,turnHistory,output,mediaRefs)=>({RequestId:chatId,RequestTitle:(turnHistory[0]?.content||text).slice(0,40)||'無題',RequestDate:turnHistory[0]?.timestamp||now,RequestUpdatedDate:now,RequestContent:text,AIOutput:output,AIOutputMedia:cloneJson(mediaRefs||[]),service,slot,turnCount:turnHistory.length,contextStrategy:modelDef.contextStrategy,outputModality:modelDef.outputModality,transport:modelDef.transport,canonicalSource:'CanonicalStore'});
   try{
-    const result=await RequestOrchestrator.send({service,slot,apiKey,text,attachments,ui:this,signal:controller.signal,chatId,epoch});diagnostic=result.diagnostic;
+    const result=await RequestOrchestrator.send({service,slot,apiKey,text,attachments,ui:this,signal:controller.signal,chatId,epoch,onDiagnostic:d=>{diagnostic=d;}});diagnostic=result.diagnostic;
     const body=result.body,media=result.media;const now=new Date().toISOString();
     if(!isStale()){WaitingTextManager.stop();this.setWaitingText('');stopBtn.hidden=true;setRequestState('ResponseReceived');syncRequestControls();markRequestDiagnostic(diagnostic,'media_detected',{mediaReceived:media.length>0,mediaCount:media.length});setRequestState('Rendering');syncRequestControls();markRequestDiagnostic(diagnostic,'render_start');}
     // 永続化に必要な処理は画面状態に触れずに先に済ませる（途中で別チャットへ移動されても、このチャットに正しく保存される）
@@ -4666,7 +4731,7 @@ UI.handleSend=async function(){
     setRequestState('Completed');clearImmersiveTimer();AppState.lastRequestResult={status:'success',body,media:displayMedia};markRequestDiagnostic(diagnostic,'completed',{status:'success'});syncRequestControls();
     input.value='';AppState.attachedFiles=[];this.renderAttachmentChips();autosize();
   }catch(error){
-    if(isStale())return; // 「＋」や履歴復元による中断：新しいチャットの状態を触らない
+    if(isStale()){if(diagnostic)failRequestDiagnostic(diagnostic,'stale',error);return;} // 「＋」や履歴復元による中断：新しいチャットの状態を触らない（診断ログだけは確定させる）
     const mapped=MapProviderError(error);this.flushStreamRender(AppState.CurrentAIOutput||'');WaitingTextManager.stop();stopBtn.hidden=true;clearImmersiveTimer();appEl.dataset.illustrationState='Static';
     if(diagnostic)failRequestDiagnostic(diagnostic,mapped.code==='ABORTED'?'abort':'api',error);AppState.lastRequestResult={status:mapped.code==='ABORTED'?'aborted':'error',error:mapped};
     if(mapped.code==='ABORTED'){
@@ -4684,7 +4749,13 @@ UI.handleSend=async function(){
       }
     }
     else {setRequestState('Failed');syncRequestControls();const suffix=error?.contextOverflow?'\n\n「recentTurns」を下げるか、新規チャットを作成してください。':'';this.renderResponseText((AppState.CurrentAIOutput?StreamFilter.visible(AppState.CurrentAIOutput)+'\n\n':'')+`⚠️ 【${service} エラー】\n${mapped.message}${suffix}`);}
-  }finally{if(AppState.abortController===controller)AppState.abortController=null;}
+  }finally{
+    if(AppState.abortController===controller)AppState.abortController=null;
+    // どの経路で抜けても、成功/失敗が確定していない診断ログを「処理中」のまま残さない
+    if(diagnostic&&!diagnostic.pendingKey&&(diagnostic.status==='processing'||diagnostic.status==='response-received')){
+      failRequestDiagnostic(diagnostic,isStale()?'stale':'interrupted',new Error('処理が完了する前に中断されました。'));
+    }
+  }
 };
 async function bootstrap() {
   // 旧バージョンで保存されていた古いendpoint入りのモデル設定は破棄し、モデル名だけを引き継ぐ
@@ -4704,6 +4775,7 @@ async function bootstrap() {
       if(recovery.recovered||recovery.expired||removed) console.info('Recovery Queue:',{...recovery,removed,pending:stats.pending,expired:stats.expired});
     } catch(e) { console.warn('保留中の保存の復旧処理に失敗しました。', e); }
   }
+  await finalizeOrphanedDiagnostics();
   UI.init();
 }
 
