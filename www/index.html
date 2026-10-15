@@ -677,8 +677,8 @@ const DEFAULT_MODEL_CONFIG = {
     endpoint: 'https://api.anthropic.com/v1/messages',
     apiConsoleUrl: 'https://console.anthropic.com/settings/keys',
     models: {
-      QuickModel: { name: 'claude-haiku-4-5', label: 'Daily' },
-      DailyModel: { name: 'claude-sonnet-5', label: 'Work' }
+      QuickModel: { name: 'claude-haiku-5-5', label: 'Daily' },
+      DailyModel: { name: 'claude-sonnet-5-5', label: 'Work' }
     }
   }
 };
@@ -1221,35 +1221,15 @@ async function purgeExpiredMedia() {
   }
 }
 
-/* ---------------- 旧サービスID（ClaudeCode 等）→ Claude への移行 ----------------
- * サービスIDを「ClaudeCode」から「Claude」に改めたため、端末に保存済みの旧キー付きデータ
- * （挿絵・セリフ・パーソナリティ・スロット設定・現在のモデル）が参照されなくなっていた。
- * AppState生成より前に、localStorage上のサービス別データを新IDへ移し替える（冪等）。
- * 挿絵は失わないよう、新旧の両方がある場合は結合する。それ以外は新ID側に実データがあればそちらを優先する。 */
-const LEGACY_CLAUDE_ID_RE = /^claude[\s_-]?code$/i;
-const LEGACY_CLAUDE_IDS = ['ClaudeCode', 'Claude Code', 'Claude_Code', 'Claude-Code'];
-function normalizeServiceId(service) {
-  return (typeof service === 'string' && LEGACY_CLAUDE_ID_RE.test(service.trim())) ? 'Claude' : service;
-}
-// {ChatGPT:..., Gemini:..., ClaudeCode:...} のようなサービス別オブジェクトの旧キーを Claude に付け替えた複製を返す（新キーが既にあれば上書きしない）
-function remapLegacyServiceKeys(obj) {
-  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return obj;
-  const out = {};
-  Object.keys(obj).forEach(k => { if (!LEGACY_CLAUDE_ID_RE.test(k)) out[k] = obj[k]; });
-  Object.keys(obj).forEach(k => { if (LEGACY_CLAUDE_ID_RE.test(k) && !('Claude' in out)) out.Claude = obj[k]; });
-  return out;
-}
-(function migrateLegacyServiceData() {
-  const isEmpty = v => v == null || v === '' || (Array.isArray(v) && v.length === 0) || (typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0);
-  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-  // key: localStorageキー / fallback: 欠けているサービスに補う初期値 / defaultValue: 「未編集の初期値」とみなす値（旧データを優先して置き換える）
+/* ---------------- 保存済みデータのサービス別エントリ補完 ----------------
+ * localStorage上のサービス別データに、現行のSERVICESのキーが欠けている場合だけ初期値を補う（冪等）。
+ * 保存済みの「現在のモデル」が現行のサービス/スロットに存在しない場合は、保存値を破棄して既定に戻す。 */
+(function ensureServiceEntries() {
   const TARGETS = [
-    { key: 'favhub_illustrations_v2',   fallback: () => [],                          merge: true },
-    { key: 'favhub_initial_texts_v2',   fallback: () => [...DEFAULT_INITIAL_TEXTS],  defaultValue: DEFAULT_INITIAL_TEXTS },
-    { key: 'favhub_waiting_texts_v2',   fallback: () => [...DEFAULT_WAITING_TEXTS],  defaultValue: DEFAULT_WAITING_TEXTS },
-    { key: 'favhub_system_prompts',     fallback: () => '' },
-    { key: 'favhub_model_names' },
-    { key: 'favhub_slot_config' },
+    { key: 'favhub_illustrations_v2', fallback: () => [] },
+    { key: 'favhub_initial_texts_v2', fallback: () => [...DEFAULT_INITIAL_TEXTS] },
+    { key: 'favhub_waiting_texts_v2', fallback: () => [...DEFAULT_WAITING_TEXTS] },
+    { key: 'favhub_system_prompts',   fallback: () => '' },
   ];
   for (const t of TARGETS) {
     try {
@@ -1257,30 +1237,17 @@ function remapLegacyServiceKeys(obj) {
       const obj = JSON.parse(raw);
       if (!obj || typeof obj !== 'object' || Array.isArray(obj)) continue;
       let changed = false;
-      for (const lk of Object.keys(obj).filter(k => k !== 'Claude' && LEGACY_CLAUDE_ID_RE.test(k))) {
-        const legacy = obj[lk];
-        if (t.merge && Array.isArray(legacy) && Array.isArray(obj.Claude)) {
-          obj.Claude = [...legacy, ...obj.Claude.filter(x => !legacy.includes(x))];
-        } else if (isEmpty(obj.Claude) || (t.defaultValue && same(obj.Claude, t.defaultValue))) {
-          obj.Claude = legacy;
-        }
-        delete obj[lk]; changed = true;
-      }
-      if (t.fallback) SERVICES.forEach(svc => { if (obj[svc] === undefined || obj[svc] === null) { obj[svc] = t.fallback(); changed = true; } });
+      SERVICES.forEach(svc => { if (obj[svc] === undefined || obj[svc] === null) { obj[svc] = t.fallback(); changed = true; } });
       if (changed) localStorage.setItem(t.key, JSON.stringify(obj));
-    } catch (e) { console.warn('旧サービスIDデータの移行に失敗しました:', t.key, e); }
+    } catch (e) { console.warn('保存済みデータの補完に失敗しました:', t.key, e); }
   }
-  // 現在選択中のモデル（service文字列）
   try {
     const raw = localStorage.getItem('favhub_current_model');
     if (raw) {
       const cur = JSON.parse(raw);
-      if (cur && typeof cur === 'object' && normalizeServiceId(cur.service) !== cur.service) {
-        cur.service = normalizeServiceId(cur.service);
-        localStorage.setItem('favhub_current_model', JSON.stringify(cur));
-      }
+      if (!cur || typeof cur !== 'object' || !SERVICES.includes(cur.service) || !SLOTS.includes(cur.slot)) localStorage.removeItem('favhub_current_model');
     }
-  } catch (e) { console.warn('現在モデルの移行に失敗しました', e); }
+  } catch (e) { localStorage.removeItem('favhub_current_model'); }
 })();
 
 /* ---------------- アプリ状態 ---------------- */
@@ -1533,7 +1500,7 @@ function saveWaitingTexts() { localStorage.setItem('favhub_waiting_texts_v2', JS
 function currentServiceIllustrations() { return (AppState.illustrations && AppState.illustrations[AppState.CurrentAIModel.service]) || []; }
 // チャット一覧のサムネイル用：そのチャットのサービスに紐づくギャラリーの先頭画像を代表画像として使う
 // （個々のチャットに専用の挿絵を保存する構造は無いため、既存の挿絵管理データを尊重してフォールバックする）
-function getServiceThumbnail(service) { const list = (AppState.illustrations && AppState.illustrations[normalizeServiceId(service)]) || []; return list[0] || null; }
+function getServiceThumbnail(service) { const list = (AppState.illustrations && AppState.illustrations[service]) || []; return list[0] || null; }
 function currentServiceInitialTexts() { const t = AppState.initialTexts?.[AppState.CurrentAIModel.service]; return (t && t.length) ? t : DEFAULT_INITIAL_TEXTS; }
 function currentServiceWaitingTexts() { const t = AppState.waitingTexts?.[AppState.CurrentAIModel.service]; return (t && t.length) ? t : DEFAULT_WAITING_TEXTS; }
 function saveHierarchicalContext() { localStorage.setItem('favhub_hierarchical_context', JSON.stringify(AppState.hierarchicalContext)); }
@@ -2109,35 +2076,142 @@ const ProviderService = {
     if(parsed.media.length&&onMedia)onMedia(parsed.media); if(interactionId&&onInteractionId)onInteractionId(interactionId);
     return {...parsed,interactionId:interactionId||parsed.interactionId,usage:completed.usage||null,responseStatus:completed.status||null};
   },
-  async sendClaude({ endpoint, apiKey, model, systemPrompt, history, prompt, attachments, useThinking, maxOutputTokens, thinkingBudgetTokens, signal, onDelta }) {
-    const contentParts = [];
-    attachments.forEach(a => { if (a.isImage) contentParts.push({ type:'image', source:{ type:'base64', media_type:a.mimeType, data:a.data.split(',')[1] } }); });
-    contentParts.push({ type:'text', text: prompt + buildAttachmentText(attachments) });
-    const messages = [...history.map(h => ({ role:h.role, content:h.content })), { role:'user', content: contentParts }];
-    const payload = { model, max_tokens: Number.isFinite(maxOutputTokens) ? maxOutputTokens : 1024, stream:true, messages };
-    if (systemPrompt) payload.system = systemPrompt;
-    if (useThinking) payload.thinking = { type:'enabled', budget_tokens: Number.isFinite(thinkingBudgetTokens) ? thinkingBudgetTokens : Math.min(1024, Number.isFinite(maxOutputTokens) ? maxOutputTokens : 1024) };
-    let finishReason = null;
-    let usage = null;
-    const res = await fetchWithTimeout(endpoint, {
-      method:'POST', signal, keepAbortAfterResponse:true,
-      headers: { 'x-api-key':apiKey, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true', 'Content-Type':'application/json', 'Accept':'text/event-stream' },
-      body: JSON.stringify(payload)
-    }, REQUEST_TIMEOUT_MS);
-    if (!res.ok) throw await providerError(res, 'Claude');
-    let terminal=false;
-    await consumeSSE(res, (event, isFullJson, eventName) => {
-      if(eventName==='error' || event?.type==='error') throw makeProviderStreamError({provider:'Claude',status:502,body:event,error:event?.error?.message||event?.message||'Claude stream error'});
-      if (event?.type === 'message_start' && event?.message?.usage) usage = event.message.usage;
-      if (event?.type === 'message_delta') { finishReason = event?.delta?.stop_reason || event?.delta?.stopReason || finishReason; if(event?.usage)usage={...(usage||{}),...event.usage}; }
-      if(event?.type==='message_stop'){terminal=true;return;}
-      if (isFullJson) { const text=(event?.content||[]).filter(c=>c.type==='text').map(c=>c.text).join(''); if(text)onDelta(text); finishReason=event?.stop_reason||event?.stopReason||finishReason; terminal=true; return; }
-      if(event?.type==='content_block_delta'&&event?.delta?.type==='text_delta'&&event.delta.text)onDelta(event.delta.text);
-    },resolveStreamIdleTimeout({thinking:!!useThinking,tools:false}));
-    if(!terminal) throw Object.assign(new Error('ストリームが途中で終了しました'),{status:502,provider:'Claude',streamError:true});
-    return { finishReason, usage };
-  },
+  async sendClaude({ endpoint, apiKey, model, systemPrompt, history, prompt, attachments, useThinking, maxOutputTokens, providerOptions={}, signal, onDelta, onSources, onToolDetails, onMedia }) {
+    const contentParts=[];
+    attachments.forEach(a=>{if(a.isImage)contentParts.push({type:'image',source:{type:'base64',media_type:a.mimeType,data:a.data.split(',')[1]}});});
+    contentParts.push({type:'text',text:prompt+buildAttachmentText(attachments)});
+    const messages=[...history.map(h=>({role:h.role,content:h.content})),{role:'user',content:contentParts}];
+    const opts={...CLAUDE_DEFAULT_OPTIONS,...(providerOptions||{})};
+    const tools=[];
+    const webSearchType=opts.dynamicFiltering?CLAUDE_TOOL_TYPES.dynamicFiltering.webSearch:CLAUDE_TOOL_TYPES.standard.webSearch;
+    const webFetchType=opts.dynamicFiltering?CLAUDE_TOOL_TYPES.dynamicFiltering.webFetch:CLAUDE_TOOL_TYPES.standard.webFetch;
+    if(opts.webSearch){const t={type:webSearchType,name:'web_search',max_uses:Math.max(1,Math.min(20,Number(opts.maxUses)||5))};if(opts.allowedDomains?.trim())t.allowed_domains=opts.allowedDomains.split(',').map(x=>x.trim()).filter(Boolean);else if(opts.blockedDomains?.trim())t.blocked_domains=opts.blockedDomains.split(',').map(x=>x.trim()).filter(Boolean);const loc={type:'approximate'};if(opts.userCity)loc.city=opts.userCity;if(opts.userRegion)loc.region=opts.userRegion;if(opts.userCountry)loc.country=opts.userCountry;if(opts.userTimezone)loc.timezone=opts.userTimezone;if(Object.keys(loc).length>1)t.user_location=loc;tools.push(t);}
+    if(opts.webFetch){const t={type:webFetchType,name:'web_fetch',max_uses:Math.max(1,Math.min(20,Number(opts.maxUses)||5)),citations:{enabled:true}};if(opts.allowedDomains?.trim())t.allowed_domains=opts.allowedDomains.split(',').map(x=>x.trim()).filter(Boolean);else if(opts.blockedDomains?.trim())t.blocked_domains=opts.blockedDomains.split(',').map(x=>x.trim()).filter(Boolean);tools.push(t);}
+    if(opts.codeExecution)tools.push({type:CLAUDE_TOOL_TYPES.codeExecution,name:'code_execution'});
 
+    let finishReason=null,usage=null,allText='',sources=[],media=[],terminal=false;
+    const citationSources=[],supplementalSources=[],toolCalls=new Map(),toolDetailsById=new Map(),citationUrls=new Set(),supplementalUrls=new Set(),generatedFileIds=new Set(),fileNames=new Map();
+    const errorLabels={invalid_tool_input:'入力が不正',unavailable:'ツール利用不可',max_uses_exceeded:'最大利用回数超過',too_many_requests:'リクエスト過多',query_too_long:'検索クエリが長すぎる',request_too_large:'リクエストサイズ超過',url_too_long:'URLが長すぎる',url_not_allowed:'URLが許可されていない',url_not_in_prior_context:'会話内にURLがない',url_not_accessible:'URL取得不可',unsupported_content_type:'未対応コンテンツ形式',execution_time_exceeded:'実行時間超過'};
+    const humanError=code=>`${errorLabels[code]||'ツールエラー'}（${code||'unknown'}）`;
+    const addCitation=(url,title)=>{if(typeof url!=='string'||!url.trim()||citationUrls.has(url))return;citationUrls.add(url);citationSources.push({url,title:typeof title==='string'&&title.trim()?title:url});};
+    const addSupplementalSource=(url,title)=>{if(typeof url!=='string'||!url.trim()||supplementalUrls.has(url))return;supplementalUrls.add(url);supplementalSources.push({url,title:typeof title==='string'&&title.trim()?title:url});};
+    const sanitizeBlocks=rawBlocks=>(rawBlocks||[]).map(raw=>{
+      const b={...raw};
+      if(b.type==='server_tool_use'&&typeof b.partial_json==='string'){
+        try{b.input=b.partial_json.trim()?JSON.parse(b.partial_json):{};}catch{b.input={};}
+      }
+      delete b.partial_json;
+      return b;
+    });
+    const rememberToolCall=b=>{
+      if(b?.type!=='server_tool_use'||!b.id)return;
+      toolCalls.set(b.id,{name:b.name||'server tool',input:b.input&&typeof b.input==='object'?b.input:{}});
+    };
+    const formatToolDetails=blocks=>{
+      const results=[];
+      for(let i=0;i<(blocks||[]).length;i++){
+        const b=blocks[i]||{};
+        const supported=['web_search_tool_result','web_fetch_tool_result','bash_code_execution_tool_result','text_editor_code_execution_tool_result','code_execution_tool_result'];
+        if(!supported.includes(b.type))continue;
+        const call=toolCalls.get(b.tool_use_id)||null;
+        const name=call?.name||(b.type==='web_search_tool_result'?'web_search':b.type==='web_fetch_tool_result'?'web_fetch':b.type.includes('text_editor')?'text_editor_code_execution':b.type.includes('bash_')?'bash_code_execution':'code_execution');
+        const input=call?.input||{};
+        const c=b.content;
+        const innerType=c?.type||'';
+        const id=b.tool_use_id||`result-${i}`;
+        let lines=[];
+        if(innerType.endsWith('_error')){
+          lines.push(`エラー: ${humanError(c.error_code)}`);
+        }else if(b.type==='web_search_tool_result'){
+          lines.push(`検索クエリ: ${input.query||'(取得できません)'}`);
+          const rows=Array.isArray(c)?c:(Array.isArray(b.content)?b.content:[]);
+          const resultsList=rows.filter(x=>x&&typeof x==='object'&&x.type!=='web_search_tool_result_error').slice(0,10);
+          if(resultsList.length)lines.push('検索結果:',...resultsList.map(x=>`${x.title||'タイトルなし'} — ${x.url||'URLなし'}`));
+          else lines.push('検索結果: 0件');
+          for(const x of resultsList)addSupplementalSource(x.url,x.title||x.url);
+        }else if(b.type==='web_fetch_tool_result'){
+          const result=c?.type==='web_fetch_result'?c:null;
+          const title=result?.content?.title||result?.title||'';
+          const url=result?.url||input.url||'';
+          lines.push(`入力URL: ${input.url||'(取得できません)'}`,`取得タイトル: ${title||'(応答にタイトルなし)'}`,`取得URL: ${url||'(応答にURLなし)'}`);
+          if(result)addSupplementalSource(url,title||url);
+        }else if(b.type==='bash_code_execution_tool_result'||b.type==='code_execution_tool_result'){
+          const result=c&&typeof c==='object'?c:{};
+          lines.push(`コマンド: ${String(input.command||'(取得できません)').slice(0,400)}`,`stdout: ${result.stdout||'(空)'}`,`stderr: ${result.stderr||'(空)'}`,`return_code: ${result.return_code??'(なし)'}`);
+          const outputs=Array.isArray(result.content)?result.content.filter(x=>x&&x.file_id):[];
+          if(outputs.length)lines.push('生成ファイル:',...outputs.map(x=>{generatedFileIds.add(x.file_id);return `file_id: ${x.file_id} / ファイル名: メタデータ取得待ち`;}));
+        }else if(b.type==='text_editor_code_execution_tool_result'){
+          const result=c&&typeof c==='object'?c:{};
+          lines.push(`操作: ${input.command||'(取得できません)'}`,`パス: ${input.path||'(なし)'}`);
+          if(innerType.endsWith('_error'))lines.push(`エラー: ${humanError(c.error_code)}`);
+          else if(typeof result.content==='string')lines.push(`内容: ${result.content.slice(0,1200)}`);
+          else if(Array.isArray(result.lines))lines.push(`差分: ${result.lines.join('\n').slice(0,1200)}`);
+          else lines.push(`結果型: ${innerType||'(不明)'}`);
+        }
+        toolDetailsById.set(id,{title:`Claude ツール: ${name}`,text:lines.join('\n')});
+      }
+      return Array.from(toolDetailsById.values());
+    };
+    const maxContinuations=5;
+    for(let turn=0;turn<=maxContinuations;turn++){
+      const payload={model,max_tokens:Number.isFinite(maxOutputTokens)&&maxOutputTokens>0?maxOutputTokens:4096,stream:true,messages};
+      if(systemPrompt)payload.system=systemPrompt;
+      if(tools.length)payload.tools=tools;
+      if(useThinking){payload.thinking={type:'adaptive'};payload.output_config={effort:CLAUDE_ADAPTIVE_EFFORT};}
+      const res=await fetchWithTimeout(endpoint,{method:'POST',signal,keepAbortAfterResponse:true,headers:{'x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true','Content-Type':'application/json','Accept':'text/event-stream'},body:JSON.stringify(payload)},resolveRequestTimeout({thinking:!!useThinking,tools:tools.length>0}));
+      if(!res.ok)throw await providerError(res,'Claude');
+      let eventTerminal=false,blocks=[],currentMessage=null,jsonBatch=false;
+      await consumeSSE(res,(event,isFullJson,eventName)=>{
+        if(eventName==='error'||event?.type==='error')throw makeProviderStreamError({provider:'Claude',status:502,body:event,error:event?.error?.message||event?.message||'Claude stream error'});
+        if(isFullJson){currentMessage=event;blocks=sanitizeBlocks(event.content||[]);finishReason=event.stop_reason||finishReason;usage=event.usage||usage;eventTerminal=true;jsonBatch=true;return;}
+        if(event?.type==='message_start'){currentMessage=event.message||{};usage=currentMessage.usage||usage;blocks=[];}
+        if(event?.type==='content_block_start'){const ix=event.index;blocks[ix]=event.content_block||{};}
+        if(event?.type==='content_block_delta'){
+          const d=event.delta||{},ix=event.index,b=blocks[ix]||{};
+          if(d.type==='text_delta'&&d.text){b.text=(b.text||'')+d.text;blocks[ix]=b;allText+=d.text;onDelta(d.text);}
+          else if(d.type==='thinking_delta'&&typeof d.thinking==='string'){b.thinking=(b.thinking||'')+d.thinking;blocks[ix]=b;}
+          else if(d.type==='signature_delta'&&typeof d.signature==='string'){b.signature=d.signature;blocks[ix]=b;}
+          else if(d.type==='citations_delta'&&d.citation){b.citations=b.citations||[];b.citations.push(d.citation);blocks[ix]=b;}
+          else if(d.type==='input_json_delta'&&typeof d.partial_json==='string'){b.partial_json=(b.partial_json||'')+d.partial_json;blocks[ix]=b;}
+        }
+        if(event?.type==='content_block_stop'){
+          const ix=event.index,b=blocks[ix]||{};
+          if(b.type==='server_tool_use'&&typeof b.partial_json==='string'){try{b.input=b.partial_json.trim()?JSON.parse(b.partial_json):{};}catch{b.input={};}delete b.partial_json;blocks[ix]=b;rememberToolCall(b);}
+          else {delete b.partial_json;blocks[ix]=b;}
+          for(const c of b.citations||[])if(c.url)addCitation(c.url,c.title||c.document_title||c.url);
+        }
+        if(event?.type==='message_delta'){finishReason=event.delta?.stop_reason||finishReason;if(event.usage)usage={...(usage||{}),...event.usage};}
+        if(event?.type==='message_stop')eventTerminal=true;
+      },resolveStreamIdleTimeout({thinking:!!useThinking,tools:tools.length>0}));
+      if(!eventTerminal)throw Object.assign(new Error('ストリームが途中で終了しました'),{status:502,provider:'Claude',streamError:true});
+      if(currentMessage?.content&&!blocks.length)blocks=sanitizeBlocks(currentMessage.content);
+      blocks=sanitizeBlocks(blocks);
+      for(const b of blocks){
+        rememberToolCall(b);
+        for(const c of b.citations||[])if(c.url)addCitation(c.url,c.title||c.document_title||c.url);
+      }
+      if(jsonBatch){for(const b of blocks){if(b.type==='text'&&typeof b.text==='string'){allText+=b.text;onDelta(b.text);}}}
+      formatToolDetails(blocks);
+      if(!finishReason)finishReason=currentMessage?.stop_reason||null;
+      if(finishReason!=='pause_turn'){terminal=true;break;}
+      if(turn===maxContinuations)throw Object.assign(new Error('Claudeのツール継続回数が上限に達しました。質問を分割して再試行してください。'),{status:502,provider:'Claude',streamError:true});
+      // pause_turnではassistantの全contentを再送し、partial_jsonだけ除去してserver_tool_use.inputを復元する。
+      messages.push({role:'assistant',content:sanitizeBlocks(blocks)});
+    }
+    if(!terminal)throw Object.assign(new Error('Claudeの応答が完了しませんでした。'),{status:502,provider:'Claude',streamError:true});
+    // 生成ファイル名は公式 Files API のメタデータから取得する。失敗しても本回答を失敗扱いにはしない。
+    await Promise.all(Array.from(generatedFileIds).map(async fileId=>{
+      try{
+        const metaRes=await fetchWithTimeout(`https://api.anthropic.com/v1/files/${encodeURIComponent(fileId)}`,{method:'GET',signal,headers:{'x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-beta':'files-api-2025-04-14','anthropic-dangerous-direct-browser-access':'true','Accept':'application/json'}},resolveRequestTimeout({}));
+        if(metaRes.ok){const meta=await metaRes.json();if(typeof meta.filename==='string'&&meta.filename)fileNames.set(fileId,meta.filename);}
+      }catch{/* メタデータ取得失敗はログに出さず、結果表示だけ継続する */}
+    }));
+    for(const detail of toolDetailsById.values())detail.text=detail.text.replace(/file_id: ([^\s]+) \/ ファイル名: メタデータ取得待ち/g,(whole,id)=>`file_id: ${id} / ファイル名: ${fileNames.get(id)||'取得できませんでした'}`);
+    // 引用が1件でもある場合は引用のみ。引用がない場合だけ検索結果とfetch結果を補助出典にする。
+    sources=citationSources.length?citationSources:supplementalSources;
+    if(onSources)onSources(sources);const toolDetails=Array.from(toolDetailsById.values());if(onToolDetails)onToolDetails(toolDetails);if(media.length&&onMedia)onMedia(media);
+    return {text:allText,media,sources,toolDetails,finishReason:finishReason||'end_turn',usage};
+  },
   async fetchOpenAIModels(key = '') {
     const res = await fetchWithTimeout('https://api.openai.com/v1/models', { headers:{ 'Authorization':`Bearer ${key}` } }, MODEL_FETCH_TIMEOUT_MS);
     const data = await readProviderJson(res, 'ChatGPT', 'OpenAIモデル一覧の取得に失敗しました');
@@ -2277,8 +2351,6 @@ const BackupService = {
 
     const data = parsed.data;
     if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('バックアップデータ内にdataフィールドが見つかりません。');
-    // 旧バックアップ（サービスIDが ClaudeCode だったもの）も Claude として復元できるようにする
-    ['modelConfig', 'systemPrompts', 'initialTexts', 'waitingTexts', 'illustrations'].forEach(k => { if (data[k] && typeof data[k] === 'object' && !Array.isArray(data[k])) data[k] = remapLegacyServiceKeys(data[k]); });
     const isStr = v => typeof v === 'string';
     const cleanTextList = arr => Array.isArray(arr) ? arr.filter(t => isStr(t) && t.trim()).map(t => t.trim()) : null;
 
@@ -2794,7 +2866,7 @@ const UI = {
         : [{ role:'user', content:req.RequestContent||'', provider:req.service, timestamp:req.RequestUpdatedDate }, { role:'assistant', content:req.AIOutput||'', provider:req.service, timestamp:req.RequestUpdatedDate }]);
     saveConversationHistory();
     // Provider StateはIndexedDBの正本から復元する。RequestLogに残った旧Interaction IDは使用しない。
-    const restoreService = normalizeServiceId(req.service) || AppState.CurrentAIModel.service; // 旧ID(ClaudeCode)で保存された履歴もClaudeとして復元
+    const restoreService = req.service || AppState.CurrentAIModel.service;
     const restoreSlot = req.slot || AppState.CurrentAIModel.slot;
     if (AppState.modelConfig[restoreService]?.models?.[restoreSlot]) {
       AppState.CurrentAIModel = { service: restoreService, slot: restoreSlot };
@@ -3459,9 +3531,11 @@ const UI = {
 
     document.getElementById('apiperservice-close-btn').onclick = () => closeModal('apiperservice-modal');
     document.getElementById('apiperservice-save-btn').onclick = () => {
-      const service=document.getElementById('apiperservice-modal').dataset.service||'Gemini';
-      readApiSlotConfigEditor(service);
-      closeModal('apiperservice-modal');
+      try {
+        const service=document.getElementById('apiperservice-modal').dataset.service||'Gemini';
+        readApiSlotConfigEditor(service);
+        closeModal('apiperservice-modal');
+      } catch (error) { alert(String(error?.message || error || '設定を保存できませんでした。')); }
     };
     document.getElementById('fetch-models-btn').onclick = async () => {
       const btn = document.getElementById('fetch-models-btn');
@@ -3773,6 +3847,9 @@ const UNLIMITED_TURNS = 99;
 const SLOT_CONTEXT_STRATEGIES = ['Auto','FavHub','Provider','Direct'];
 const SLOT_OUTPUT_MODALITIES = ['auto','text','image','tts','transcribe','video'];
 const SLOT_TRANSPORTS = ['default','interactions'];
+const CLAUDE_TOOL_TYPES = Object.freeze({ standard:Object.freeze({webSearch:'web_search_20250305',webFetch:'web_fetch_20250910'}), dynamicFiltering:Object.freeze({webSearch:'web_search_20260318',webFetch:'web_fetch_20260318'}), codeExecution:'code_execution_20260521' });
+const CLAUDE_ADAPTIVE_EFFORT = 'high';
+const CLAUDE_DEFAULT_OPTIONS = Object.freeze({webSearch:false,webFetch:false,codeExecution:false,dynamicFiltering:false,maxUses:5,allowedDomains:'',blockedDomains:'',userCity:'',userRegion:'',userCountry:'',userTimezone:''});
 const OPENAI_DEFAULT_OPTIONS = Object.freeze({webSearch:false,codeExecution:false,imageGeneration:false,codeExecutionMemory:'1g',ttsVoice:'marin',ttsFormat:'mp3',ttsInstructions:'',transcriptionLanguage:'',imageSize:'auto',imageQuality:'auto',imageBackground:'auto',imageFormat:'png',imageToolModel:'gpt-image-2.5-flare'});
 const DEFAULT_SLOT_CONFIG = { contextStrategy:'Auto', outputModality:'text', transport:'default', maxOutputTokens:null, thinking:{enabled:false,budgetTokens:null}, recentTurns:2 };
 const ADAPTER_CAPABILITIES = {
@@ -3787,7 +3864,6 @@ function normalizeSlotConfig(raw, adapterId, diagnostics=[]) {
   let strategy = SLOT_CONTEXT_STRATEGIES.includes(c.contextStrategy) ? c.contextStrategy : DEFAULT_SLOT_CONFIG.contextStrategy;
   // 旧Gemini設定のInteraction API=利用するは、現在の「API依存」へ移行する。
   if(adapterId==='gemini' && c.transport==='interactions' && strategy!=='Provider') strategy='Provider';
-  const output = SLOT_OUTPUT_MODALITIES.includes(c.outputModality) ? c.outputModality : 'text';
   const transport = adapterId==='openai' ? 'responses' : (SLOT_TRANSPORTS.includes(c.transport) ? c.transport : 'default');
   let recent = Number.isInteger(c.recentTurns) ? c.recentTurns : DEFAULT_SLOT_CONFIG.recentTurns;
   if (recent < 1 || recent > UNLIMITED_TURNS) { diagnostics.push('recentTurnsを2へ補正'); recent=2; }
@@ -3795,6 +3871,8 @@ function normalizeSlotConfig(raw, adapterId, diagnostics=[]) {
   if (!Number.isFinite(max) || max <= 0) max=null;
   const thinking = c.thinking && typeof c.thinking==='object' ? c.thinking : {};
   const budget = thinking.budgetTokens == null || thinking.budgetTokens === '' ? null : Number(thinking.budgetTokens);
+  let output = SLOT_OUTPUT_MODALITIES.includes(c.outputModality) ? c.outputModality : 'text';
+  if(adapterId==='anthropic' && !['auto','text'].includes(output)) output='text';
   return {
     contextStrategy:strategy,
     outputModality:output,
@@ -3803,7 +3881,8 @@ function normalizeSlotConfig(raw, adapterId, diagnostics=[]) {
     thinking:{enabled:!!thinking.enabled,budgetTokens:Number.isFinite(budget)&&budget>0?budget:null},
     recentTurns:recent,
     geminiOptions:cloneJson(c.geminiOptions||{}),
-    openaiOptions:{...OPENAI_DEFAULT_OPTIONS,...(c.openaiOptions||{})}
+    openaiOptions:{...OPENAI_DEFAULT_OPTIONS,...(c.openaiOptions||{})},
+    claudeOptions:{...CLAUDE_DEFAULT_OPTIONS,...(c.claudeOptions||{})}
 
   };
 }
@@ -3819,6 +3898,8 @@ function ensureSlotConfigsInMemory(){
       m.thinking = m.thinking || {enabled:false,budgetTokens:null};
       m.recentTurns = Number.isInteger(m.recentTurns) ? m.recentTurns : 2;
       m.openaiOptions = {...OPENAI_DEFAULT_OPTIONS,...(m.openaiOptions||{})};
+      m.claudeOptions = {...CLAUDE_DEFAULT_OPTIONS,...(m.claudeOptions||{})};
+      if(!Number.isFinite(Number(m.claudeOptions.maxUses))||Number(m.claudeOptions.maxUses)<1)m.claudeOptions.maxUses=5;
       if(!['1g','4g','16g','64g'].includes(m.openaiOptions.codeExecutionMemory)) m.openaiOptions.codeExecutionMemory='1g';
       if(AppState.modelConfig[service].provider==='gemini'){
         const legacyGemini={
@@ -3933,7 +4014,7 @@ function renderApiSlotConfigEditor(serviceFilter='Gemini'){
   const autoNote = provider==='anthropic'
     ? '自動：Claudeは「アプリ内」として動作します。'
     : '自動：Gemini / OpenAIは「API依存」として動作します。';
-  const outputOptions=[['auto','自動（モデルに任せる）'],['text','テキスト'],['image','画像'],['tts','音声生成'],['transcribe','文字起こし'],['video','動画']];
+  const outputOptions=provider==='anthropic'?[['auto','自動（モデルに任せる）'],['text','テキスト']]:[['auto','自動（モデルに任せる）'],['text','テキスト'],['image','画像'],['tts','音声生成'],['transcribe','文字起こし'],['video','動画']];
   const transport=(m)=>provider==='gemini'
     ? ''
     : provider==='openai'
@@ -3993,6 +4074,25 @@ function renderApiSlotConfigEditor(serviceFilter='Gemini'){
       <div class="config-help">文字起こし結果から「えー」「あの」などのフィラーを整理します。</div>
           </div>`;
   };
+  const claudeOptions=(m)=>{
+    const c={...CLAUDE_DEFAULT_OPTIONS,...(m.claudeOptions||{})};
+    if(provider!=='anthropic')return '';
+    return `<div class="gemini-slot-tools"><h5>Claude Tools</h5>
+      <div class="config-help">サーバー側ツールは追加課金が発生する場合があります。必要な機能だけを有効にしてください。Agent SDKではなく、Anthropic APIのサーバーツールを使用します。</div>
+      <label class="check-row"><input type="checkbox" data-cfield="webSearch" ${c.webSearch?'checked':''}><span>Web検索（検索グラウンディング）</span></label>
+      <div class="config-help">最新情報を検索し、出典付き回答を生成します。Anthropic Consoleで組織管理者が無効化している場合は利用できません。</div>
+      <label class="check-row"><input type="checkbox" data-cfield="webFetch" ${c.webFetch?'checked':''}><span>Web fetch（URL取得）</span></label>
+      <div class="config-help">追加課金なし。取得した内容のトークン代がかかるため、大きなページでは費用が増えます。</div>
+      <label class="check-row"><input type="checkbox" data-cfield="dynamicFiltering" ${c.dynamicFiltering?'checked':''}><span>動的フィルタリング（対応モデルのみ）</span></label>
+      <div class="config-help">Web search / Web fetch の動的フィルタリング版を使用します。非対応モデルではAPIエラーになる場合があります。既定はOFF（標準版）です。</div>
+      <label class="check-row"><input type="checkbox" data-cfield="codeExecution" ${c.codeExecution?'checked':''}><span>Code execution</span></label>
+      <div class="config-help">Pythonをサンドボックスで実行し、計算・データ処理・ファイル生成を行います。プロジェクトのコード自体は変更しません。実行料金が発生する場合があります。</div>
+      <div class="slot-grid"><div><label>Web検索/取得の最大回数</label><input data-cfield="maxUses" type="number" min="1" max="20" value="${escapeHtmlAttr(c.maxUses)}"><div class="config-help">Web検索・URL取得それぞれの上限です。</div></div>
+      <div><label>許可ドメイン（任意）</label><input data-cfield="allowedDomains" value="${escapeHtmlAttr(c.allowedDomains)}" placeholder="example.com,docs.example.com"></div>
+      <div><label>除外ドメイン（任意）</label><input data-cfield="blockedDomains" value="${escapeHtmlAttr(c.blockedDomains)}" placeholder="private.example.com"></div>
+      <div><label>検索地域 City（任意）</label><input data-cfield="userCity" value="${escapeHtmlAttr(c.userCity)}"></div><div><label>Region</label><input data-cfield="userRegion" value="${escapeHtmlAttr(c.userRegion)}"></div><div><label>Country（ISO 2文字）</label><input data-cfield="userCountry" value="${escapeHtmlAttr(c.userCountry)}" maxlength="2"></div><div><label>Timezone（IANA）</label><input data-cfield="userTimezone" value="${escapeHtmlAttr(c.userTimezone)}" placeholder="Asia/Tokyo"></div></div>
+      <div class="config-help">許可ドメインと除外ドメインは同時に指定できません。Code executionの生成ファイルは現状、実行ログとテキストのみ表示します。</div></div>`;
+  };
   root.innerHTML=`<section class="slot-config-card" data-service="${service}"><label>${serviceLabels[service]}</label>${SLOTS.map(slot=>{
     const m=cfg.models[slot];
     return `<div class="api-slot-config" data-service="${service}" data-slot="${slot}">
@@ -4003,9 +4103,9 @@ function renderApiSlotConfigEditor(serviceFilter='Gemini'){
         ${transport(m)}
         <div><label>最大出力トークン量</label><input data-field="maxOutputTokens" type="number" min="1" value="${m.maxOutputTokens??''}" placeholder="自動"></div>
         <div><label>会話保持ターン数</label><input data-field="recentTurns" type="number" min="1" max="99" value="${m.recentTurns}"><div class="slot-note">99 = 保存済み会話を全て送信</div></div>
-        <div><label>推論</label>${inlineSelectHtml('thinkingEnabled',m.thinking?.enabled?'true':'false',[['false','OFF'],['true','ON']])}</div>
-        <div><label>推論トークン量</label><input data-field="thinkingBudgetTokens" type="number" min="1" value="${m.thinking?.budgetTokens??''}" placeholder="自動"><div class="config-help">Providerによって指定方法が異なります。</div></div>
-      </div>${openaiOptions(m)}${geminiOptions(m)}
+        <div><label>推論</label>${inlineSelectHtml('thinkingEnabled',m.thinking?.enabled?'true':'false',[['false','OFF'],['true','ON']])}${provider==='anthropic'?'<div class="config-help">Claudeの推論は自動調整です。adaptive 非対応のモデルでは、推論をOFFにしてください。</div>':''}</div>
+        ${provider==='anthropic'?'':`<div><label>推論トークン量</label><input data-field="thinkingBudgetTokens" type="number" min="1" value="${m.thinking?.budgetTokens??''}" placeholder="自動"><div class="config-help">Providerによって指定方法が異なります。</div></div>`}
+      </div>${openaiOptions(m)}${geminiOptions(m)}${claudeOptions(m)}
     </div>`;
   }).join('')}</section>`;
   bindInlineSelects(root);
@@ -4015,7 +4115,15 @@ function readApiSlotConfigEditor(serviceFilter='Gemini'){
   if(!root)return;
   const service=serviceFilter;
   const provider=AppState.modelConfig[service].provider;
-  for(const card of root.querySelectorAll('.api-slot-config')){
+  const cards=Array.from(root.querySelectorAll('.api-slot-config'));
+  if(service==='Claude'){
+    for(const card of cards){
+      const cf=f=>card.querySelector(`[data-cfield="${f}"]`);
+      const allowed=cf('allowedDomains')?.value?.trim()||'', blocked=cf('blockedDomains')?.value?.trim()||'';
+      if(allowed&&blocked)throw new Error('Claude Toolsでは許可ドメインと除外ドメインを同時に指定できません。どちらか一方を空にしてください。');
+    }
+  }
+  for(const card of cards){
     const slot=card.dataset.slot,m=AppState.modelConfig[service].models[slot];
     const get=f=>card.querySelector(`[data-field="${f}"]`);
     m.contextStrategy=inlineSelectValue(card,'contextStrategy','Auto');
@@ -4042,6 +4150,12 @@ function readApiSlotConfigEditor(serviceFilter='Gemini'){
         imageFormat:inlineSelectValue(card,'imageFormat',o.imageFormat||'png'),
         imageToolModel:of('imageToolModel')?.value?.trim()||'gpt-image-2.5-flare'
       };
+    }
+    if(service==='Claude'){
+      const c=m.claudeOptions||{}; const cf=f=>card.querySelector(`[data-cfield="${f}"]`);
+      const allowed=cf('allowedDomains')?.value?.trim()||'', blocked=cf('blockedDomains')?.value?.trim()||'';
+      const maxUses=Number(cf('maxUses')?.value); m.claudeOptions={...CLAUDE_DEFAULT_OPTIONS,...c,webSearch:!!cf('webSearch')?.checked,webFetch:!!cf('webFetch')?.checked,codeExecution:!!cf('codeExecution')?.checked,dynamicFiltering:!!cf('dynamicFiltering')?.checked,maxUses:Number.isFinite(maxUses)?Math.max(1,Math.min(20,Math.round(maxUses))):5,allowedDomains:allowed,blockedDomains:blocked,userCity:cf('userCity')?.value?.trim()||'',userRegion:cf('userRegion')?.value?.trim()||'',userCountry:(cf('userCountry')?.value?.trim()||'').toUpperCase().slice(0,2),userTimezone:cf('userTimezone')?.value?.trim()||''};
+      if(!['auto','text'].includes(m.outputModality))m.outputModality='text';
     }
     if(service==='Gemini'){
       const g=m.geminiOptions||{}; const gf=f=>card.querySelector(`[data-gfield="${f}"]`);
@@ -4673,7 +4787,7 @@ const ClaudeAdapter={
   id:'anthropic', capabilities:ADAPTER_CAPABILITIES.anthropic,
   async send(req){
     if(req.projection.strategy==='Provider') throw Object.assign(new Error('ClaudeはProvider Strategyをサポートしません。FavHubまたはDirectを選択してください。'),{provider:'Claude',configError:true});
-    return normalizeProviderResponse(await ProviderService.sendClaude({endpoint:req.endpoint,apiKey:req.apiKey,model:req.model,systemPrompt:req.systemPrompt,history:req.projection.recentMessages,prompt:req.request.prompt,attachments:req.request.attachments,useThinking:req.slotConfig.thinking.enabled,maxOutputTokens:req.slotConfig.maxOutputTokens,thinkingBudgetTokens:req.slotConfig.thinking.budgetTokens,signal:req.signal,onDelta:req.onDelta}),'Claude');
+    return normalizeProviderResponse(await ProviderService.sendClaude({endpoint:req.endpoint,apiKey:req.apiKey,model:req.model,systemPrompt:req.systemPrompt,history:req.projection.recentMessages,prompt:req.request.prompt,attachments:req.request.attachments,useThinking:req.slotConfig.thinking.enabled,maxOutputTokens:req.slotConfig.maxOutputTokens,providerOptions:req.slotConfig.claudeOptions,signal:req.signal,onDelta:req.onDelta,onSources:req.onSources,onToolDetails:req.onToolDetails,onMedia:req.onMedia}),'Claude');
   }
 };
 ProviderRegistry.register('gemini',GeminiAdapter); ProviderRegistry.register('openai',OpenAIAdapter); ProviderRegistry.register('anthropic',ClaudeAdapter);
@@ -4686,7 +4800,7 @@ const ContextCacheStrategy={mode:'provider-native',getManifest(){return {mode:th
 const ContextCompression={summarize(){throw new Error('Context CompressionはPhase B拡張点です。Canonical Conversationは破壊しません。');}};
 
 /* Phase 1 persistence */
-function saveSlotConfig(){const out={};for(const service of SERVICES){out[service]={};for(const slot of SLOTS){const m=AppState.modelConfig[service].models[slot];out[service][slot]={name:m.name,contextStrategy:m.contextStrategy,outputModality:m.outputModality,transport:m.transport,maxOutputTokens:m.maxOutputTokens,thinking:cloneJson(m.thinking),recentTurns:m.recentTurns,geminiOptions:cloneJson(m.geminiOptions||undefined),openaiOptions:cloneJson(m.openaiOptions||undefined)};}}localStorage.setItem('favhub_slot_config',JSON.stringify(out));}
+function saveSlotConfig(){const out={};for(const service of SERVICES){out[service]={};for(const slot of SLOTS){const m=AppState.modelConfig[service].models[slot];out[service][slot]={name:m.name,contextStrategy:m.contextStrategy,outputModality:m.outputModality,transport:m.transport,maxOutputTokens:m.maxOutputTokens,thinking:cloneJson(m.thinking),recentTurns:m.recentTurns,geminiOptions:cloneJson(m.geminiOptions||undefined),openaiOptions:cloneJson(m.openaiOptions||undefined),claudeOptions:cloneJson(m.claudeOptions||undefined)};}}localStorage.setItem('favhub_slot_config',JSON.stringify(out));}
 function loadSlotConfig(){const raw=safeJSONParse('favhub_slot_config',null);const legacyInteraction=localStorage.getItem('favhub_gemini_interaction_id_enabled')==='true';if(!raw){if(legacyInteraction){for(const slot of SLOTS){AppState.modelConfig.Gemini.models[slot].contextStrategy='Provider';}localStorage.removeItem('favhub_gemini_interaction_id_enabled');}ensureSlotConfigsInMemory();return;}const diagnostics=[];for(const service of SERVICES)for(const slot of SLOTS){const src=raw?.[service]?.[slot];if(src){const n=normalizeSlotConfig(src,AppState.modelConfig[service].provider,diagnostics);Object.assign(AppState.modelConfig[service].models[slot],n);if(typeof src.name==='string'&&src.name.trim())AppState.modelConfig[service].models[slot].name=src.name.trim();}}if(legacyInteraction){for(const slot of SLOTS){if(AppState.modelConfig.Gemini.models[slot].contextStrategy==='Auto')AppState.modelConfig.Gemini.models[slot].contextStrategy='Provider';}localStorage.removeItem('favhub_gemini_interaction_id_enabled');}if(diagnostics.length)console.warn('SlotConfig migration:',diagnostics);ensureSlotConfigsInMemory();}
 
 function slotIdFor(service,slot){return `${service}:${slot}`;}
@@ -4858,14 +4972,7 @@ async function bootstrap() {
 
   // Secure Storageからのキー復元を先に試みる（ネイティブ環境優先、ブラウザはlocalStorageフォールバック）
   for (const service of SERVICES) {
-    let key = (await getSecure(`apiKey.${service}`)) || '';
-    // 旧サービスID（ClaudeCode等）で保存されたAPIキーを、新ID(Claude)へ引き継ぐ（旧キーは削除せずコピーのみ）
-    if (!key && service === 'Claude') {
-      for (const legacyId of LEGACY_CLAUDE_IDS) {
-        const legacyKey = (await getSecure(`apiKey.${legacyId}`)) || '';
-        if (legacyKey) { key = legacyKey; try { await setSecure('apiKey.Claude', legacyKey); } catch (e) { console.warn('APIキーの移行保存に失敗しました', e); } break; }
-      }
-    }
+    const key = (await getSecure(`apiKey.${service}`)) || '';
     AppState.keys[service] = key;
   }
   if (typeof CanonicalStore !== 'undefined') {
