@@ -1219,6 +1219,68 @@ async function purgeExpiredMedia() {
   }
 }
 
+/* ---------------- 旧サービスID（ClaudeCode 等）→ Claude への移行 ----------------
+ * サービスIDを「ClaudeCode」から「Claude」に改めたため、端末に保存済みの旧キー付きデータ
+ * （挿絵・セリフ・パーソナリティ・スロット設定・現在のモデル）が参照されなくなっていた。
+ * AppState生成より前に、localStorage上のサービス別データを新IDへ移し替える（冪等）。
+ * 挿絵は失わないよう、新旧の両方がある場合は結合する。それ以外は新ID側に実データがあればそちらを優先する。 */
+const LEGACY_CLAUDE_ID_RE = /^claude[\s_-]?code$/i;
+const LEGACY_CLAUDE_IDS = ['ClaudeCode', 'Claude Code', 'Claude_Code', 'Claude-Code'];
+function normalizeServiceId(service) {
+  return (typeof service === 'string' && LEGACY_CLAUDE_ID_RE.test(service.trim())) ? 'Claude' : service;
+}
+// {ChatGPT:..., Gemini:..., ClaudeCode:...} のようなサービス別オブジェクトの旧キーを Claude に付け替えた複製を返す（新キーが既にあれば上書きしない）
+function remapLegacyServiceKeys(obj) {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return obj;
+  const out = {};
+  Object.keys(obj).forEach(k => { if (!LEGACY_CLAUDE_ID_RE.test(k)) out[k] = obj[k]; });
+  Object.keys(obj).forEach(k => { if (LEGACY_CLAUDE_ID_RE.test(k) && !('Claude' in out)) out.Claude = obj[k]; });
+  return out;
+}
+(function migrateLegacyServiceData() {
+  const isEmpty = v => v == null || v === '' || (Array.isArray(v) && v.length === 0) || (typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0);
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  // key: localStorageキー / fallback: 欠けているサービスに補う初期値 / defaultValue: 「未編集の初期値」とみなす値（旧データを優先して置き換える）
+  const TARGETS = [
+    { key: 'favhub_illustrations_v2',   fallback: () => [],                          merge: true },
+    { key: 'favhub_initial_texts_v2',   fallback: () => [...DEFAULT_INITIAL_TEXTS],  defaultValue: DEFAULT_INITIAL_TEXTS },
+    { key: 'favhub_waiting_texts_v2',   fallback: () => [...DEFAULT_WAITING_TEXTS],  defaultValue: DEFAULT_WAITING_TEXTS },
+    { key: 'favhub_system_prompts',     fallback: () => '' },
+    { key: 'favhub_model_names' },
+    { key: 'favhub_slot_config' },
+  ];
+  for (const t of TARGETS) {
+    try {
+      const raw = localStorage.getItem(t.key); if (!raw) continue;
+      const obj = JSON.parse(raw);
+      if (!obj || typeof obj !== 'object' || Array.isArray(obj)) continue;
+      let changed = false;
+      for (const lk of Object.keys(obj).filter(k => k !== 'Claude' && LEGACY_CLAUDE_ID_RE.test(k))) {
+        const legacy = obj[lk];
+        if (t.merge && Array.isArray(legacy) && Array.isArray(obj.Claude)) {
+          obj.Claude = [...legacy, ...obj.Claude.filter(x => !legacy.includes(x))];
+        } else if (isEmpty(obj.Claude) || (t.defaultValue && same(obj.Claude, t.defaultValue))) {
+          obj.Claude = legacy;
+        }
+        delete obj[lk]; changed = true;
+      }
+      if (t.fallback) SERVICES.forEach(svc => { if (obj[svc] === undefined || obj[svc] === null) { obj[svc] = t.fallback(); changed = true; } });
+      if (changed) localStorage.setItem(t.key, JSON.stringify(obj));
+    } catch (e) { console.warn('旧サービスIDデータの移行に失敗しました:', t.key, e); }
+  }
+  // 現在選択中のモデル（service文字列）
+  try {
+    const raw = localStorage.getItem('favhub_current_model');
+    if (raw) {
+      const cur = JSON.parse(raw);
+      if (cur && typeof cur === 'object' && normalizeServiceId(cur.service) !== cur.service) {
+        cur.service = normalizeServiceId(cur.service);
+        localStorage.setItem('favhub_current_model', JSON.stringify(cur));
+      }
+    }
+  } catch (e) { console.warn('現在モデルの移行に失敗しました', e); }
+})();
+
 /* ---------------- アプリ状態 ---------------- */
 const AppState = {
   // AIモデル（仕様書のCurrentAIModel: service/slot）
@@ -1469,7 +1531,7 @@ function saveWaitingTexts() { localStorage.setItem('favhub_waiting_texts_v2', JS
 function currentServiceIllustrations() { return (AppState.illustrations && AppState.illustrations[AppState.CurrentAIModel.service]) || []; }
 // チャット一覧のサムネイル用：そのチャットのサービスに紐づくギャラリーの先頭画像を代表画像として使う
 // （個々のチャットに専用の挿絵を保存する構造は無いため、既存の挿絵管理データを尊重してフォールバックする）
-function getServiceThumbnail(service) { const list = (AppState.illustrations && AppState.illustrations[service]) || []; return list[0] || null; }
+function getServiceThumbnail(service) { const list = (AppState.illustrations && AppState.illustrations[normalizeServiceId(service)]) || []; return list[0] || null; }
 function currentServiceInitialTexts() { const t = AppState.initialTexts?.[AppState.CurrentAIModel.service]; return (t && t.length) ? t : DEFAULT_INITIAL_TEXTS; }
 function currentServiceWaitingTexts() { const t = AppState.waitingTexts?.[AppState.CurrentAIModel.service]; return (t && t.length) ? t : DEFAULT_WAITING_TEXTS; }
 function saveHierarchicalContext() { localStorage.setItem('favhub_hierarchical_context', JSON.stringify(AppState.hierarchicalContext)); }
@@ -2213,6 +2275,8 @@ const BackupService = {
 
     const data = parsed.data;
     if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('バックアップデータ内にdataフィールドが見つかりません。');
+    // 旧バックアップ（サービスIDが ClaudeCode だったもの）も Claude として復元できるようにする
+    ['modelConfig', 'systemPrompts', 'initialTexts', 'waitingTexts', 'illustrations'].forEach(k => { if (data[k] && typeof data[k] === 'object' && !Array.isArray(data[k])) data[k] = remapLegacyServiceKeys(data[k]); });
     const isStr = v => typeof v === 'string';
     const cleanTextList = arr => Array.isArray(arr) ? arr.filter(t => isStr(t) && t.trim()).map(t => t.trim()) : null;
 
@@ -2728,7 +2792,7 @@ const UI = {
         : [{ role:'user', content:req.RequestContent||'', provider:req.service, timestamp:req.RequestUpdatedDate }, { role:'assistant', content:req.AIOutput||'', provider:req.service, timestamp:req.RequestUpdatedDate }]);
     saveConversationHistory();
     // Provider StateはIndexedDBの正本から復元する。RequestLogに残った旧Interaction IDは使用しない。
-    const restoreService = req.service || AppState.CurrentAIModel.service;
+    const restoreService = normalizeServiceId(req.service) || AppState.CurrentAIModel.service; // 旧ID(ClaudeCode)で保存された履歴もClaudeとして復元
     const restoreSlot = req.slot || AppState.CurrentAIModel.slot;
     if (AppState.modelConfig[restoreService]?.models?.[restoreSlot]) {
       AppState.CurrentAIModel = { service: restoreService, slot: restoreSlot };
@@ -3034,6 +3098,7 @@ const UI = {
           const file = (e.target.files || [])[0]; if (!file) return;
           try {
             const compressed = await compressImage(file);
+            if (!Array.isArray(AppState.illustrations[service])) AppState.illustrations[service] = [];
             AppState.illustrations[service].push(compressed);
             if (!saveIllustrations()) {
               AppState.illustrations[service].pop();
@@ -4791,7 +4856,15 @@ async function bootstrap() {
 
   // Secure Storageからのキー復元を先に試みる（ネイティブ環境優先、ブラウザはlocalStorageフォールバック）
   for (const service of SERVICES) {
-    AppState.keys[service] = (await getSecure(`apiKey.${service}`)) || '';
+    let key = (await getSecure(`apiKey.${service}`)) || '';
+    // 旧サービスID（ClaudeCode等）で保存されたAPIキーを、新ID(Claude)へ引き継ぐ（旧キーは削除せずコピーのみ）
+    if (!key && service === 'Claude') {
+      for (const legacyId of LEGACY_CLAUDE_IDS) {
+        const legacyKey = (await getSecure(`apiKey.${legacyId}`)) || '';
+        if (legacyKey) { key = legacyKey; try { await setSecure('apiKey.Claude', legacyKey); } catch (e) { console.warn('APIキーの移行保存に失敗しました', e); } break; }
+      }
+    }
+    AppState.keys[service] = key;
   }
   if (typeof CanonicalStore !== 'undefined') {
     try {
