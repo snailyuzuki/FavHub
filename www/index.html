@@ -88,12 +88,14 @@ button { cursor:pointer; }
 /* ---------- イマーシブ入室ボタン ----------
    .stage-spacer と .output-panel の境界に置く高さ0のアンカー。ボタンはアンカーの下端基準で
    上に浮かせるので、出力パネルの高さ（通常/展開/テキスト量）が変わっても常にパネル直上・中央に追従する。
-   見た目は .icon-button.glass（トップバーの丸ボタン）と共通。z-indexはトップバー(20)より下。 */
+   見た目は再読み込みボタン(.output-reload-btn)と同じ控えめな配色（枠.35 / 背景.06 / 文字.35）。
+   見た目は32pxだが、::afterで当たり判定を44pxに広げて押しやすさを確保する。z-indexはトップバー(20)より下。 */
 .immersive-enter-anchor { position:relative; flex:0 0 0; height:0; z-index:13; }
 .immersive-enter-anchor[hidden] { display:none; }
-.immersive-enter-btn { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); }
-.immersive-enter-btn svg { width:20px; height:20px; display:block; color:#fff; opacity:.95; filter:drop-shadow(0 1px 2px rgba(0,0,0,.35)); }
-.immersive-enter-btn:active { background:rgba(255,255,255,.18); }
+.immersive-enter-btn { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); width:32px; height:32px; padding:0; border-radius:50%; border:1.5px solid rgba(255,255,255,.35); background:rgba(255,255,255,.06); color:rgba(255,255,255,.35); display:grid; place-items:center; cursor:pointer; -webkit-tap-highlight-color:transparent; }
+.immersive-enter-btn::after { content:''; position:absolute; inset:-6px; border-radius:50%; }
+.immersive-enter-btn svg { width:16px; height:16px; display:block; }
+.immersive-enter-btn:active { background:rgba(255,255,255,.12); color:rgba(255,255,255,.55); border-color:rgba(255,255,255,.5); }
 
 /* ---------- output panel (novel-window) ---------- */
 .output-panel { flex:0 1 auto; z-index:12; margin:0 12px 14px 12px; max-height:45dvh; min-height:0; border:1.5px solid rgba(255,255,255,.5); border-radius:20px; background:rgba(10,10,32,.68); box-shadow:var(--shadow); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); overflow:hidden; display:flex; flex-direction:column; transition:max-height .3s ease; cursor:pointer; }
@@ -326,8 +328,8 @@ button:disabled { opacity:.38; cursor:not-allowed; }
   <div class="stage-spacer"></div>
 
   <div id="immersive-enter-anchor" class="immersive-enter-anchor">
-    <button type="button" id="immersive-enter-btn" class="immersive-enter-btn icon-button glass" aria-label="イマーシブビューに入る（全画面表示）" title="イマーシブビュー（全画面表示）">
-      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7V3h4M17 7V3h-4M3 13v4h4M17 13v4h-4"/></svg>
+    <button type="button" id="immersive-enter-btn" class="immersive-enter-btn" aria-label="イマーシブビューに入る（全画面表示）" title="イマーシブビュー（全画面表示）">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7V3h4M17 7V3h-4M3 13v4h4M17 13v4h-4"/></svg>
     </button>
   </div>
 
