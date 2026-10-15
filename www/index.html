@@ -85,6 +85,16 @@ button { cursor:pointer; }
 /* 可変領域：イラストが見える余白。ここに直接タップ用リスナーを張るのでpointer-eventsは通常通り有効 */
 .stage-spacer { flex:1 1 auto; min-height:0; }
 
+/* ---------- イマーシブ入室ボタン ----------
+   .stage-spacer と .output-panel の境界に置く高さ0のアンカー。ボタンはアンカーの下端基準で
+   上に浮かせるので、出力パネルの高さ（通常/展開/テキスト量）が変わっても常にパネル直上・中央に追従する。
+   見た目は .icon-button.glass（トップバーの丸ボタン）と共通。z-indexはトップバー(20)より下。 */
+.immersive-enter-anchor { position:relative; flex:0 0 0; height:0; z-index:13; }
+.immersive-enter-anchor[hidden] { display:none; }
+.immersive-enter-btn { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); }
+.immersive-enter-btn svg { width:20px; height:20px; display:block; color:#fff; opacity:.95; filter:drop-shadow(0 1px 2px rgba(0,0,0,.35)); }
+.immersive-enter-btn:active { background:rgba(255,255,255,.18); }
+
 /* ---------- output panel (novel-window) ---------- */
 .output-panel { flex:0 1 auto; z-index:12; margin:0 12px 14px 12px; max-height:45dvh; min-height:0; border:1.5px solid rgba(255,255,255,.5); border-radius:20px; background:rgba(10,10,32,.68); box-shadow:var(--shadow); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); overflow:hidden; display:flex; flex-direction:column; transition:max-height .3s ease; cursor:pointer; }
 .output-panel.expanded { max-height:70dvh; }
@@ -135,7 +145,7 @@ button { cursor:pointer; }
 
 
 /* ---------- immersive ---------- */
-.immersive .topbar, .immersive .command-bar, .immersive .output-panel { display:none !important; }
+.immersive .topbar, .immersive .command-bar, .immersive .output-panel, .immersive .immersive-enter-anchor { display:none !important; }
 .immersive .illustration { z-index:100; transform:scale(1.02); filter:none; }
 .immersive .backdrop-wash { z-index:101; opacity:.05; }
 .immersive .backdrop-vignette { z-index:102; }
@@ -315,6 +325,12 @@ button:disabled { opacity:.38; cursor:not-allowed; }
 
   <div class="stage-spacer"></div>
 
+  <div id="immersive-enter-anchor" class="immersive-enter-anchor">
+    <button type="button" id="immersive-enter-btn" class="immersive-enter-btn icon-button glass" aria-label="イマーシブビューに入る（全画面表示）" title="イマーシブビュー（全画面表示）">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7V3h4M17 7V3h-4M3 13v4h4M17 13v4h-4"/></svg>
+    </button>
+  </div>
+
   <section id="output-panel" class="output-panel">
     <div class="output-head">
       <div><span class="eyebrow">AI OUTPUT</span><span id="waiting-text" class="waiting-text"></span></div>
@@ -373,7 +389,7 @@ button:disabled { opacity:.38; cursor:not-allowed; }
       <div class="api-console-provider-links" aria-label="APIコンソールへのショートカット">
         <button type="button" class="primary-btn api-console-provider-btn" data-api-console-service="ChatGPT">OpenAI APIコンソール</button>
         <button type="button" class="primary-btn api-console-provider-btn" data-api-console-service="Gemini">Gemini APIコンソール</button>
-        <button type="button" class="primary-btn api-console-provider-btn" data-api-console-service="ClaudeCode">Claude APIコンソール</button>
+        <button type="button" class="primary-btn api-console-provider-btn" data-api-console-service="Claude">Claude APIコンソール</button>
       </div>
     </div>
   </div>
@@ -394,7 +410,7 @@ button:disabled { opacity:.38; cursor:not-allowed; }
 <div id="gallery-modal" class="modal-overlay">
   <div class="modal-content">
     <h3><span class="drawer-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="3.5" width="15" height="13" rx="2"/><circle cx="7" cy="8" r="1.4"/><path d="M4 14l4-4 3 3 2-2 3 3"/></svg></span>ビジュアル設定</h3>
-    <p class="sub">サービス（ChatGPT/Gemini/ClaudeCode）ごとに、使用する挿絵を設定します。</p>
+    <p class="sub">サービス（ChatGPT/Gemini/Claude）ごとに、使用する挿絵を設定します。</p>
 
     <h4>ChatGPT</h4>
     <button class="primary-btn upload-img-btn" data-service="ChatGPT" style="width:100%; margin-bottom:8px;">＋ 画像を追加（1枚選択）</button>
@@ -404,9 +420,9 @@ button:disabled { opacity:.38; cursor:not-allowed; }
     <button class="primary-btn upload-img-btn" data-service="Gemini" style="width:100%; margin-bottom:8px;">＋ 画像を追加（1枚選択）</button>
     <div id="img-gallery-Gemini" class="img-gallery"></div>
 
-    <h4>ClaudeCode</h4>
-    <button class="primary-btn upload-img-btn" data-service="ClaudeCode" style="width:100%; margin-bottom:8px;">＋ 画像を追加（1枚選択）</button>
-    <div id="img-gallery-ClaudeCode" class="img-gallery"></div>
+    <h4>Claude</h4>
+    <button class="primary-btn upload-img-btn" data-service="Claude" style="width:100%; margin-bottom:8px;">＋ 画像を追加（1枚選択）</button>
+    <div id="img-gallery-Claude" class="img-gallery"></div>
 
     <button id="gallery-modal-close" class="menu-item" style="text-align:center; margin-top:10px;">閉じる</button>
   </div>
@@ -422,8 +438,8 @@ button:disabled { opacity:.38; cursor:not-allowed; }
     <input type="password" id="chatgpt-key-input" placeholder="sk-...">
     <label>Gemini API Key</label>
     <input type="password" id="gemini-key-input" placeholder="AIzaSy...">
-    <label>ClaudeCode API Key</label>
-    <input type="password" id="claudecode-key-input" placeholder="sk-ant-...">
+    <label>Claude API Key</label>
+    <input type="password" id="claude-key-input" placeholder="sk-ant-...">
     <div class="modal-actions">
       <button id="apikeys-close-btn">キャンセル</button>
       <button id="apikeys-save-btn" class="primary-btn">保存</button>
@@ -467,8 +483,8 @@ button:disabled { opacity:.38; cursor:not-allowed; }
     <textarea id="prompt-chatgpt-input" rows="2" placeholder="ChatGPT向けの指示（パーソナリティ）を入力..."></textarea>
     <label>Gemini パーソナリティ設定</label>
     <textarea id="prompt-gemini-input" rows="2" placeholder="Gemini向けの指示（パーソナリティ）を入力..."></textarea>
-    <label>ClaudeCode パーソナリティ設定</label>
-    <textarea id="prompt-claudecode-input" rows="2" placeholder="ClaudeCode向けの指示（パーソナリティ）を入力..."></textarea>
+    <label>Claude パーソナリティ設定</label>
+    <textarea id="prompt-claude-input" rows="2" placeholder="Claude向けの指示（パーソナリティ）を入力..."></textarea>
     <div class="modal-actions">
       <button id="persona-close-btn">キャンセル</button>
       <button id="persona-save-btn" class="primary-btn">保存</button>
@@ -541,7 +557,7 @@ button:disabled { opacity:.38; cursor:not-allowed; }
 <div id="texts-modal" class="modal-overlay">
   <div class="modal-content">
     <h3><span class="drawer-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4h14v9H8l-3 3v-3H3V4z"/></svg></span>セリフ設定</h3>
-    <p class="sub">サービス（ChatGPT/Gemini/ClaudeCode）ごとに、待機中のセリフを設定します。</p>
+    <p class="sub">サービス（ChatGPT/Gemini/Claude）ごとに、待機中のセリフを設定します。</p>
 
     <h4>ChatGPT</h4>
     <label>初期表示テキスト（改行区切り）</label>
@@ -555,11 +571,11 @@ button:disabled { opacity:.38; cursor:not-allowed; }
     <label>思考中テキスト（改行区切り）</label>
     <textarea id="waiting-texts-Gemini-input" rows="3"></textarea>
 
-    <h4>ClaudeCode</h4>
+    <h4>Claude</h4>
     <label>初期表示テキスト（改行区切り）</label>
-    <textarea id="initial-texts-ClaudeCode-input" rows="3"></textarea>
+    <textarea id="initial-texts-Claude-input" rows="3"></textarea>
     <label>思考中テキスト（改行区切り）</label>
-    <textarea id="waiting-texts-ClaudeCode-input" rows="3"></textarea>
+    <textarea id="waiting-texts-Claude-input" rows="3"></textarea>
 
     <button id="reset-texts-btn" class="sub-btn" style="width:100%; margin-top:8px; border:1px solid rgba(255,255,255,.2); padding:6px; color:#aaa;">↺ 全サービスのテキストを初期値に戻す</button>
     <div class="modal-actions">
@@ -628,8 +644,8 @@ const Camera = CapacitorPlugins.Camera;
 
 /* ---------------- モデル設定 ----------------
  * OpenAIは現在の公式仕様に合わせてResponses APIを使用する。
- * Gemini/ClaudeCodeの既存経路は変更しない。
- * ClaudeCode（Anthropic Messages API）はストリーミングのまま維持。
+ * Gemini/Claudeの既存経路は変更しない。
+ * Claude（Anthropic Messages API）はストリーミングのまま維持。
  * サービス名・内部スロットキー（QuickModel/DailyModel）・デフォルトモデル名は互換性のため維持し、UIではDailyモデル/Workモデルと表示する。
  * ---------------------------------------------------------------- */
 // Gemini Interactions API（interaction ID方式）のエンドポイント。有効時はgenerateContentの代わりにこちらを使う。
@@ -654,7 +670,7 @@ const DEFAULT_MODEL_CONFIG = {
       DailyModel: { name: 'gemini-3.1-pro', label: 'Work' }
     }
   },
-  ClaudeCode: {
+  Claude: {
     provider: 'anthropic',
     endpoint: 'https://api.anthropic.com/v1/messages',
     apiConsoleUrl: 'https://console.anthropic.com/settings/keys',
@@ -664,7 +680,7 @@ const DEFAULT_MODEL_CONFIG = {
     }
   }
 };
-const SERVICES = ['ChatGPT', 'Gemini', 'ClaudeCode'];
+const SERVICES = ['ChatGPT', 'Gemini', 'Claude'];
 const SLOTS = ['QuickModel', 'DailyModel'];
 
 /* ---------------- ハンバーガーメニュー：情報設計 ----------------
@@ -717,7 +733,7 @@ const DRAWER_CATEGORIES = {
   ]}
 };
 
-const DEFAULT_SYSTEM_PROMPTS = { ChatGPT: '', Gemini: '', ClaudeCode: '' };
+const DEFAULT_SYSTEM_PROMPTS = { ChatGPT: '', Gemini: '', Claude: '' };
 
 const DEFAULT_INITIAL_TEXTS = [
   '何か用かな？',
@@ -1273,15 +1289,15 @@ const AppState = {
   // gemini-3.5-transcribe利用時、Smart transcription（フィラー除去・整形）を使うか（デフォルトOFF＝verbatim）。
   GeminiTranscribeSmartMode: localStorage.getItem('favhub_gemini_transcribe_smart') === 'true',
 
-  keys: { ChatGPT:'', Gemini:'', ClaudeCode:'' },
+  keys: { ChatGPT:'', Gemini:'', Claude:'' },
 
-  // 挿絵・セリフ設定はペルソナ指示と同様、サービス（ChatGPT/Gemini/ClaudeCode）ごとに保持する
-  illustrations: safeJSONParse('favhub_illustrations_v2', { ChatGPT:[], Gemini:[], ClaudeCode:[] }),
+  // 挿絵・セリフ設定はペルソナ指示と同様、サービス（ChatGPT/Gemini/Claude）ごとに保持する
+  illustrations: safeJSONParse('favhub_illustrations_v2', { ChatGPT:[], Gemini:[], Claude:[] }),
   lastResponse: localStorage.getItem('favhub_last_response') || '',
   // 直近の生成物（画像/音声/動画/ファイル）。会話復元・アプリ再起動後も表示を保つため永続化する。
   lastResponseMedia: safeJSONParse('favhub_last_response_media', []),
-  initialTexts: safeJSONParse('favhub_initial_texts_v2', { ChatGPT:[...DEFAULT_INITIAL_TEXTS], Gemini:[...DEFAULT_INITIAL_TEXTS], ClaudeCode:[...DEFAULT_INITIAL_TEXTS] }),
-  waitingTexts: safeJSONParse('favhub_waiting_texts_v2', { ChatGPT:[...DEFAULT_WAITING_TEXTS], Gemini:[...DEFAULT_WAITING_TEXTS], ClaudeCode:[...DEFAULT_WAITING_TEXTS] }),
+  initialTexts: safeJSONParse('favhub_initial_texts_v2', { ChatGPT:[...DEFAULT_INITIAL_TEXTS], Gemini:[...DEFAULT_INITIAL_TEXTS], Claude:[...DEFAULT_INITIAL_TEXTS] }),
+  waitingTexts: safeJSONParse('favhub_waiting_texts_v2', { ChatGPT:[...DEFAULT_WAITING_TEXTS], Gemini:[...DEFAULT_WAITING_TEXTS], Claude:[...DEFAULT_WAITING_TEXTS] }),
   attachedFiles: [],
 
   // RequestState（仕様書準拠）: Ready/Processing/Completed/Interrupted/Failed
@@ -1727,7 +1743,7 @@ function blobToDataUrl(blob){
 }
 function buildAttachmentText(attachments = []) {
   // 音声・PDF・動画添付はいずれもbase64バイナリであり、テキストとしてそのままプロンプトに
-  // 埋め込むと意味を持たない上に無駄にトークンを消費するため除外する（ChatGPT/ClaudeCodeは
+  // 埋め込むと意味を持たない上に無駄にトークンを消費するため除外する（ChatGPT/Claudeは
   // 現状これらをそのまま送る手段が無いため、単純に無視する。Gemini向けはsendGemini/
   // sendGeminiInteraction側でinline_data等として個別に送信している）。
   return attachments.filter(a => !a.isImage && !a.isAudio && !a.isPdf && !a.isVideo && !a.isBinary).map(a => `\n\n【添付ファイル: ${a.name}】\n${a.data}`).join('');
@@ -2029,7 +2045,7 @@ const ProviderService = {
     if(parsed.media.length&&onMedia)onMedia(parsed.media); if(interactionId&&onInteractionId)onInteractionId(interactionId);
     return {...parsed,interactionId:interactionId||parsed.interactionId,usage:completed.usage||null,responseStatus:completed.status||null};
   },
-  async sendClaudeCode({ endpoint, apiKey, model, systemPrompt, history, prompt, attachments, useThinking, maxOutputTokens, thinkingBudgetTokens, signal, onDelta }) {
+  async sendClaude({ endpoint, apiKey, model, systemPrompt, history, prompt, attachments, useThinking, maxOutputTokens, thinkingBudgetTokens, signal, onDelta }) {
     const contentParts = [];
     attachments.forEach(a => { if (a.isImage) contentParts.push({ type:'image', source:{ type:'base64', media_type:a.mimeType, data:a.data.split(',')[1] } }); });
     contentParts.push({ type:'text', text: prompt + buildAttachmentText(attachments) });
@@ -2044,17 +2060,17 @@ const ProviderService = {
       headers: { 'x-api-key':apiKey, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true', 'Content-Type':'application/json', 'Accept':'text/event-stream' },
       body: JSON.stringify(payload)
     }, REQUEST_TIMEOUT_MS);
-    if (!res.ok) throw await providerError(res, 'ClaudeCode');
+    if (!res.ok) throw await providerError(res, 'Claude');
     let terminal=false;
     await consumeSSE(res, (event, isFullJson, eventName) => {
-      if(eventName==='error' || event?.type==='error') throw makeProviderStreamError({provider:'ClaudeCode',status:502,body:event,error:event?.error?.message||event?.message||'Claude stream error'});
+      if(eventName==='error' || event?.type==='error') throw makeProviderStreamError({provider:'Claude',status:502,body:event,error:event?.error?.message||event?.message||'Claude stream error'});
       if (event?.type === 'message_start' && event?.message?.usage) usage = event.message.usage;
       if (event?.type === 'message_delta') { finishReason = event?.delta?.stop_reason || event?.delta?.stopReason || finishReason; if(event?.usage)usage={...(usage||{}),...event.usage}; }
       if(event?.type==='message_stop'){terminal=true;return;}
       if (isFullJson) { const text=(event?.content||[]).filter(c=>c.type==='text').map(c=>c.text).join(''); if(text)onDelta(text); finishReason=event?.stop_reason||event?.stopReason||finishReason; terminal=true; return; }
       if(event?.type==='content_block_delta'&&event?.delta?.type==='text_delta'&&event.delta.text)onDelta(event.delta.text);
     },resolveStreamIdleTimeout({thinking:!!useThinking,tools:false}));
-    if(!terminal) throw Object.assign(new Error('ストリームが途中で終了しました'),{status:502,provider:'ClaudeCode',streamError:true});
+    if(!terminal) throw Object.assign(new Error('ストリームが途中で終了しました'),{status:502,provider:'Claude',streamError:true});
     return { finishReason, usage };
   },
 
@@ -2082,7 +2098,7 @@ const ProviderService = {
   async fetchClaudeModels(key = '') {
     const res = await fetchWithTimeout('https://api.anthropic.com/v1/models', { headers:{ 'x-api-key':key, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true' } }, MODEL_FETCH_TIMEOUT_MS);
     const data = await res.json();
-    if (!res.ok || data.error) throw new Error(data.error?.message || 'ClaudeCode APIキーが無効です。');
+    if (!res.ok || data.error) throw new Error(data.error?.message || 'Claude APIキーが無効です。');
     return data.data.map(m => m.id);
   }
 };
@@ -2386,6 +2402,12 @@ function startImmersiveTimer() {
   AppState.immersiveTimer = setTimeout(() => { if (AppState.RequestState === 'Processing') EnterImmersiveView(); }, AppState.ImmersiveViewDelay);
 }
 function clearImmersiveTimer() { clearTimeout(AppState.immersiveTimer); AppState.immersiveTimer = null; }
+/* イマーシブ入室ボタンは、設定でイマーシブビューが有効なときだけ表示する */
+function syncImmersiveEnterButton() {
+  const anchor = document.getElementById('immersive-enter-anchor');
+  if (anchor) anchor.hidden = !AppState.ImmersiveViewEnabled;
+}
+syncImmersiveEnterButton();
 function EnterImmersiveView() {
   if (!AppState.ImmersiveViewEnabled) return;
   if (appEl.classList.contains('immersive')) return; // 二重入室でモーションが瞬間リセットされるのを防ぐ
@@ -2423,7 +2445,7 @@ const UI = {
   // トップバー内で完結するプルダウンに変更した。ネイティブ<select>はOSのピッカーが
   // 画面全体に被って出てきてしまうため、ボタン直下にメイン画面内で展開する自前のリストにした。
   // AIコンテキストと同じ「タップでサイクル」トグルにできない理由：
-  // サービス（ChatGPT/Gemini/ClaudeCode）×スロット（Quick/Daily）の組み合わせが6通りあり、
+  // サービス（ChatGPT/Gemini/Claude）×スロット（Quick/Daily）の組み合わせが6通りあり、
   // かつサービス切替は挿絵ギャラリー切替と連動するため、1タップで意図した選択肢へ
   // 直接ジャンプできるプルダウンの方が適している。
   syncAiSelectButton() {
@@ -2758,11 +2780,11 @@ const UI = {
     const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
     setVal('chatgpt-key-input', AppState.keys.ChatGPT);
     setVal('gemini-key-input', AppState.keys.Gemini);
-    setVal('claudecode-key-input', AppState.keys.ClaudeCode);
+    setVal('claude-key-input', AppState.keys.Claude);
     document.getElementById('secure-storage-note').textContent = hasNativeSecureStorage() ? '（端末の安全な領域に保存されます）' : '（このブラウザ内に保存されます）';
   },
   populateApiPerServiceForm(service='Gemini') {
-    const titles={ChatGPT:'OpenAI API設定',Gemini:'Gemini API設定',ClaudeCode:'Claude API設定'};
+    const titles={ChatGPT:'OpenAI API設定',Gemini:'Gemini API設定',Claude:'Claude API設定'};
     const title=document.querySelector('#apiperservice-modal h3'); if(title) title.lastChild.textContent=titles[service]||'API別設定';
     renderApiSlotConfigEditor(service);
   },
@@ -2773,7 +2795,7 @@ const UI = {
     const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
     setVal('prompt-chatgpt-input', AppState.systemPrompts.ChatGPT || '');
     setVal('prompt-gemini-input', AppState.systemPrompts.Gemini || '');
-    setVal('prompt-claudecode-input', AppState.systemPrompts.ClaudeCode || '');
+    setVal('prompt-claude-input', AppState.systemPrompts.Claude || '');
   },
   populateImmersiveForm() {
     const immersiveToggle = document.getElementById('immersive-enabled-toggle');
@@ -2862,7 +2884,7 @@ const UI = {
       if (a === 'api-per-service') { this.populateApiPerServiceForm('Gemini'); document.getElementById('apiperservice-modal').dataset.service='Gemini'; openModal('apiperservice-modal'); }
       if (a === 'openai-settings') { this.populateApiPerServiceForm('ChatGPT'); document.getElementById('apiperservice-modal').dataset.service='ChatGPT'; openModal('apiperservice-modal'); }
       if (a === 'gemini-settings') { this.populateApiPerServiceForm('Gemini'); document.getElementById('apiperservice-modal').dataset.service='Gemini'; openModal('apiperservice-modal'); }
-      if (a === 'claude-settings') { this.populateApiPerServiceForm('ClaudeCode'); document.getElementById('apiperservice-modal').dataset.service='ClaudeCode'; openModal('apiperservice-modal'); }
+      if (a === 'claude-settings') { this.populateApiPerServiceForm('Claude'); document.getElementById('apiperservice-modal').dataset.service='Claude'; openModal('apiperservice-modal'); }
       if (a === 'models') { this.populateModelsForm(); openModal('models-modal'); }
       if (a === 'persona') { this.populatePersonaForm(); openModal('persona-modal'); }
       if (a === 'hcontext') { this.renderHierarchicalContextForm(); openModal('hcontext-modal'); }
@@ -2878,14 +2900,17 @@ const UI = {
       }
     });
 
-    /* --- 没入表示: タップで入室/退室をトグル ---
-     * 以前は.backdropにリスナーを張っていたが、.stage新設に伴い.stage-spacer(pointer-events:none)を
-     * 透過してもその親である.stage自体（pointer-events:autoのまま）がヒットテストを止めてしまい、
-     * .backdropまでクリックが届いていなかった（待機時・返答待ち時とも入退室不可の原因）。
-     * pointer-events頼みの透過には頼らず、.stage-spacer自身に直接リスナーを張る。 */
+    /* --- 没入表示 ---
+     * 入室：出力パネル直上の「イマーシブ入室ボタン」のみ（画面の空き領域タップでの入室は廃止）。
+     *       ※Processing中の自動入室（startImmersiveTimer）は従来どおり。
+     * 退室：没入中は画面タップで退室（従来どおり）。没入中は.stage-spacerが全面を占めるので、
+     *       pointer-events頼みの透過には頼らず.stage-spacer自身にリスナーを張る。 */
+    document.getElementById('immersive-enter-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      EnterImmersiveView();
+    });
     document.querySelector('.stage-spacer').addEventListener('click', () => {
-      if (appEl.classList.contains('immersive')) { ExitImmersiveView(); return; }
-      if (AppState.ImmersiveViewEnabled) EnterImmersiveView();
+      if (appEl.classList.contains('immersive')) ExitImmersiveView();
     });
     immersiveCompleteBtn.onclick = (e) => { e.stopPropagation(); ExitImmersiveView(); };
 
@@ -3352,11 +3377,11 @@ const UI = {
       const getVal = id => document.getElementById(id).value.trim();
       AppState.keys.ChatGPT = getVal('chatgpt-key-input');
       AppState.keys.Gemini = getVal('gemini-key-input');
-      AppState.keys.ClaudeCode = getVal('claudecode-key-input');
+      AppState.keys.Claude = getVal('claude-key-input');
       try {
         await setSecure('apiKey.ChatGPT', AppState.keys.ChatGPT);
         await setSecure('apiKey.Gemini', AppState.keys.Gemini);
-        await setSecure('apiKey.ClaudeCode', AppState.keys.ClaudeCode);
+        await setSecure('apiKey.Claude', AppState.keys.Claude);
       } catch (e) {
         console.error('APIキーの保存に失敗しました。', e);
         alert('APIキーを保存できませんでした。端末のSecure Storageの状態を確認して、もう一度お試しください。');
@@ -3375,7 +3400,7 @@ const UI = {
       const btn = document.getElementById('fetch-models-btn');
       const chatgptKey = document.getElementById('chatgpt-key-input').value.trim();
       const geminiKey = document.getElementById('gemini-key-input').value.trim();
-      const claudeKey = document.getElementById('claudecode-key-input').value.trim();
+      const claudeKey = document.getElementById('claude-key-input').value.trim();
       btn.textContent = '取得中...'; btn.disabled = true;
       try {
         // 自動取得は「初回設定・最新モデルへの追従」専用。高推論系（o1/o3等）や
@@ -3403,8 +3428,8 @@ const UI = {
           const list = await ProviderService.fetchClaudeModels(claudeKey);
           const daily = list[0];
           const work = list[1] || list[0];
-          if (daily) setModelEditorName('ClaudeCode','QuickModel',daily);
-          if (work) setModelEditorName('ClaudeCode','DailyModel',work);
+          if (daily) setModelEditorName('Claude','QuickModel',daily);
+          if (work) setModelEditorName('Claude','DailyModel',work);
         }
         alert('APIキーで利用可能なモデル一覧を取得し、「使用モデル」の入力欄に補完しました！');
       } catch (e) { alert(`モデル取得エラー: ${e.message}`); }
@@ -3422,7 +3447,7 @@ const UI = {
     document.getElementById('persona-close-btn').onclick = () => closeModal('persona-modal');
     document.getElementById('persona-save-btn').onclick = () => {
       const getVal = id => document.getElementById(id).value.trim();
-      AppState.systemPrompts = { ChatGPT:getVal('prompt-chatgpt-input'), Gemini:getVal('prompt-gemini-input'), ClaudeCode:getVal('prompt-claudecode-input') };
+      AppState.systemPrompts = { ChatGPT:getVal('prompt-chatgpt-input'), Gemini:getVal('prompt-gemini-input'), Claude:getVal('prompt-claude-input') };
       localStorage.setItem('favhub_system_prompts', JSON.stringify(AppState.systemPrompts));
       closeModal('persona-modal');
     };
@@ -3449,6 +3474,7 @@ const UI = {
       const immersiveToggle = document.getElementById('immersive-enabled-toggle');
       AppState.ImmersiveViewEnabled = immersiveToggle ? immersiveToggle.checked : true;
       localStorage.setItem('favhub_immersive_enabled', String(AppState.ImmersiveViewEnabled));
+      syncImmersiveEnterButton();
       const motionToggle = document.getElementById('immersive-motion-toggle');
       AppState.ImmersiveMotionEnabled = motionToggle ? motionToggle.checked : true;
       localStorage.setItem('favhub_immersive_motion_enabled', String(AppState.ImmersiveMotionEnabled));
@@ -3756,7 +3782,7 @@ function ensureSlotConfigsInMemory(){
  * 以前は保存ハンドラだけがreadSlotConfigEditor/setModelEditorNameを参照していたため、
  * editor DOM自体が生成されず、AIモデル登録のスロットが空欄のまま表示されていた。
  */
-const MODEL_SERVICE_LABELS = { ChatGPT:'ChatGPT', Gemini:'Gemini', ClaudeCode:'ClaudeCode' };
+const MODEL_SERVICE_LABELS = { ChatGPT:'ChatGPT', Gemini:'Gemini', Claude:'Claude' };
 const SLOT_LABELS = { QuickModel:'Dailyモデル', DailyModel:'Workモデル' };
 function escapeHtmlAttr(value){
   return String(value ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -3835,7 +3861,7 @@ function renderApiSlotConfigEditor(serviceFilter='Gemini'){
   const service=serviceFilter;
   const cfg=AppState.modelConfig[service];
   const provider=cfg.provider;
-  const serviceLabels={ChatGPT:'OpenAI API設定',Gemini:'Gemini API設定',ClaudeCode:'Claude API設定'};
+  const serviceLabels={ChatGPT:'OpenAI API設定',Gemini:'Gemini API設定',Claude:'Claude API設定'};
   const strategyOptions=[['Auto','自動'],['FavHub','アプリ内'],['Provider','API依存'],['Direct','なし']];
   const autoNote = provider==='anthropic'
     ? '自動：Claudeは「アプリ内」として動作します。'
@@ -4579,8 +4605,8 @@ const OpenAIAdapter={
 const ClaudeAdapter={
   id:'anthropic', capabilities:ADAPTER_CAPABILITIES.anthropic,
   async send(req){
-    if(req.projection.strategy==='Provider') throw Object.assign(new Error('ClaudeはProvider Strategyをサポートしません。FavHubまたはDirectを選択してください。'),{provider:'ClaudeCode',configError:true});
-    return normalizeProviderResponse(await ProviderService.sendClaudeCode({endpoint:req.endpoint,apiKey:req.apiKey,model:req.model,systemPrompt:req.systemPrompt,history:req.projection.recentMessages,prompt:req.request.prompt,attachments:req.request.attachments,useThinking:req.slotConfig.thinking.enabled,maxOutputTokens:req.slotConfig.maxOutputTokens,thinkingBudgetTokens:req.slotConfig.thinking.budgetTokens,signal:req.signal,onDelta:req.onDelta}),'ClaudeCode');
+    if(req.projection.strategy==='Provider') throw Object.assign(new Error('ClaudeはProvider Strategyをサポートしません。FavHubまたはDirectを選択してください。'),{provider:'Claude',configError:true});
+    return normalizeProviderResponse(await ProviderService.sendClaude({endpoint:req.endpoint,apiKey:req.apiKey,model:req.model,systemPrompt:req.systemPrompt,history:req.projection.recentMessages,prompt:req.request.prompt,attachments:req.request.attachments,useThinking:req.slotConfig.thinking.enabled,maxOutputTokens:req.slotConfig.maxOutputTokens,thinkingBudgetTokens:req.slotConfig.thinking.budgetTokens,signal:req.signal,onDelta:req.onDelta}),'Claude');
   }
 };
 ProviderRegistry.register('gemini',GeminiAdapter); ProviderRegistry.register('openai',OpenAIAdapter); ProviderRegistry.register('anthropic',ClaudeAdapter);
@@ -4617,7 +4643,7 @@ const RequestOrchestrator={
     const modelDef=getSlotConfig(service,slot); const adapterId=AppState.modelConfig[service].provider; const adapter=ProviderRegistry.get(adapterId);
     const contextMode=CONTEXT_MODES.includes(AppState.AIContext)?AppState.AIContext:'Deep';
     let strategy=ContextManager.resolveStrategy(adapterId,modelDef.contextStrategy);
-    if(adapterId==='anthropic'&&strategy==='Provider') throw Object.assign(new Error('ClaudeはProvider Strategyをサポートしません。'),{provider:'ClaudeCode',configError:true});
+    if(adapterId==='anthropic'&&strategy==='Provider') throw Object.assign(new Error('ClaudeはProvider Strategyをサポートしません。'),{provider:'Claude',configError:true});
     const canonical=await ContextManager.load(chatId); canonical.identity=buildIdentity(service); canonical.project=normalizeProjectContext(AppState.hierarchicalContext); canonical.request={currentPrompt:text,attachments:cloneJson(attachments),toolResults:[]};
     const useProviderState = strategy==='Provider' && contextMode!=='Single';
     const providerState=useProviderState ? await ProviderStateManager.get(chatId,slotIdFor(service,slot)) : null;
