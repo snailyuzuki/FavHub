@@ -2199,18 +2199,63 @@ const ProviderService = {
       messages.push({role:'assistant',content:sanitizeBlocks(blocks)});
     }
     if(!terminal)throw Object.assign(new Error('Claudeの応答が完了しませんでした。'),{status:502,provider:'Claude',streamError:true});
-    // 生成ファイル名は公式 Files API のメタデータから取得する。失敗しても本回答を失敗扱いにはしない。
-    await Promise.all(Array.from(generatedFileIds).map(async fileId=>{
+    // 生成ファイルは公式 Files API から取得する（メタデータ→本体の順。両方とも独立して試す）。
+    // 失敗しても本回答は失敗扱いにせず、理由を fileFetch（診断ログ）とツール詳細へ残す。
+    const FILES_API_BASE='https://api.anthropic.com/v1/files';
+    const CLAUDE_FILE_MAX_BYTES=20*1024*1024;
+    const filesApiHeaders=accept=>({'x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-beta':'files-api-2025-04-14','anthropic-dangerous-direct-browser-access':'true','Accept':accept});
+    const failText=e=>{
+      const name=e?.name||'Error',msg=maskSecretsInText(e?.message||e||'').slice(0,160);
+      const hint=name==='TypeError'?'（通信失敗：CORS・オフライン等の可能性）':name==='TimeoutError'?'（タイムアウト）':name==='AbortError'?'（中断）':'';
+      return `${name}: ${msg}${hint}`;
+    };
+    const httpFailText=async r=>{let body='';try{body=maskSecretsInText(await r.text()).slice(0,200);}catch{}return `HTTP ${r.status}${body?` ${body}`:''}`;};
+    const fetched=await Promise.all(Array.from(generatedFileIds).map(async fileId=>{
+      const rec={fileId,metaStatus:null,contentStatus:null,fileName:null,mimeType:null,bytes:null,metaError:null,contentError:null};
+      let meta=null,blob=null;
       try{
-        const metaRes=await fetchWithTimeout(`https://api.anthropic.com/v1/files/${encodeURIComponent(fileId)}`,{method:'GET',signal,headers:{'x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-beta':'files-api-2025-04-14','anthropic-dangerous-direct-browser-access':'true','Accept':'application/json'}},resolveRequestTimeout({}));
-        if(metaRes.ok){const meta=await metaRes.json();if(typeof meta.filename==='string'&&meta.filename)fileNames.set(fileId,meta.filename);}
-      }catch{/* メタデータ取得失敗はログに出さず、結果表示だけ継続する */}
+        const r=await fetchWithTimeout(`${FILES_API_BASE}/${encodeURIComponent(fileId)}`,{method:'GET',signal,headers:filesApiHeaders('application/json')},resolveRequestTimeout({}));
+        rec.metaStatus=r.status;
+        if(r.ok)meta=await r.json();else rec.metaError=await httpFailText(r);
+      }catch(e){rec.metaStatus='network_error';rec.metaError=failText(e);}
+      if(meta?.downloadable===false){rec.contentStatus='not_downloadable';rec.contentError='このファイルはダウンロード不可（downloadable=false）';}
+      else{
+        try{
+          const r=await fetchWithTimeout(`${FILES_API_BASE}/${encodeURIComponent(fileId)}/content`,{method:'GET',signal,headers:filesApiHeaders('*/*')},resolveRequestTimeout({tools:true}));
+          rec.contentStatus=r.status;
+          if(r.ok){
+            const b=await r.blob();rec.bytes=b.size;
+            if(b.size>CLAUDE_FILE_MAX_BYTES){rec.contentError=`サイズ超過（上限 ${CLAUDE_FILE_MAX_BYTES} bytes）`;}
+            else blob=b;
+          }else rec.contentError=await httpFailText(r);
+        }catch(e){rec.contentStatus='network_error';rec.contentError=failText(e);}
+      }
+      rec.fileName=(typeof meta?.filename==='string'&&meta.filename)?meta.filename:null;
+      if(rec.fileName)fileNames.set(fileId,rec.fileName);
+      const usable=m=>(m&&m!=='application/octet-stream')?m:'';
+      rec.mimeType=usable(meta?.mime_type)||usable(blob?.type)||mimeFromFileName(rec.fileName||'')||(blob?'application/octet-stream':null);
+      let item=null;
+      if(blob){
+        const mime=rec.mimeType||'application/octet-stream';
+        // dataURLのmimeが空/汎用型だと画像等の表示に影響するため、型を明示したBlobで作り直す
+        const dataUrl=await blobToDataUrl(new Blob([blob],{type:mime}));
+        item={kind:mediaKindFromMime(mime),mimeType:mime,dataUrl,fileName:rec.fileName||`claude_${String(fileId).slice(-8)}.${mediaExtFromMime(mime)}`};
+      }
+      return {rec,item};
     }));
-    for(const detail of toolDetailsById.values())detail.text=detail.text.replace(/file_id: ([^\s]+) \/ ファイル名: メタデータ取得待ち/g,(whole,id)=>`file_id: ${id} / ファイル名: ${fileNames.get(id)||'取得できませんでした'}`);
+    const fileFetch=fetched.map(x=>x.rec);
+    for(const x of fetched)if(x.item)media.push(x.item);
+    const fetchSummary=id=>{
+      const r=fileFetch.find(x=>x.fileId===id);if(!r)return '';
+      const st=v=>typeof v==='number'?`HTTP ${v}`:(v||'未実施');
+      const errs=[r.metaError&&`メタデータ: ${r.metaError}`,r.contentError&&`本体: ${r.contentError}`].filter(Boolean);
+      return `\n取得結果: メタデータ=${st(r.metaStatus)} / 本体=${st(r.contentStatus)}${r.bytes!=null?` (${r.bytes} bytes)`:''}${errs.length?`\n${errs.join('\n')}`:''}`;
+    };
+    for(const detail of toolDetailsById.values())detail.text=detail.text.replace(/file_id: ([^\s]+) \/ ファイル名: メタデータ取得待ち/g,(whole,id)=>`file_id: ${id} / ファイル名: ${fileNames.get(id)||'取得できませんでした'}${fetchSummary(id)}`);
     // 引用が1件でもある場合は引用のみ。引用がない場合だけ検索結果とfetch結果を補助出典にする。
     sources=citationSources.length?citationSources:supplementalSources;
     if(onSources)onSources(sources);const toolDetails=Array.from(toolDetailsById.values());if(onToolDetails)onToolDetails(toolDetails);if(media.length&&onMedia)onMedia(media);
-    return {text:allText,media,sources,toolDetails,finishReason:finishReason||'end_turn',usage};
+    return {text:allText,media,sources,toolDetails,finishReason:finishReason||'end_turn',usage,...(fileFetch.length?{fileFetch}:{})};
   },
   async fetchOpenAIModels(key = '') {
     const res = await fetchWithTimeout('https://api.openai.com/v1/models', { headers:{ 'Authorization':`Bearer ${key}` } }, MODEL_FETCH_TIMEOUT_MS);
@@ -4858,7 +4903,7 @@ const RequestOrchestrator={
     try{providerResponse=await adapter.send(request);}
     catch(err){throw normalizeProviderError(err);}
     if(!stale()) ui.flushStreamRender(output);
-    markRequestDiagnostic(diagnostic,'response_received',{status:'response-received',textReceived:!!String(output).trim(),finishReason:providerResponse?.finishReason||null,usage:providerResponse?.usage||null,projectionType:projection.projectionType,contextStrategy:projection.strategy,outputModality:modelDef.outputModality});
+    markRequestDiagnostic(diagnostic,'response_received',{status:'response-received',textReceived:!!String(output).trim(),finishReason:providerResponse?.finishReason||null,usage:providerResponse?.usage||null,...(providerResponse?.fileFetch?{fileFetch:providerResponse.fileFetch}:{}),projectionType:projection.projectionType,contextStrategy:projection.strategy,outputModality:modelDef.outputModality});
     if(isTruncatedFinishReason(providerResponse?.finishReason)) diagnostic.contextUpdateSkipped='finishReason';
     const body=StreamFilter.stripForConversation(output);
     const contextUpdate=ContextManager.extractContextUpdate({contextMode,response:output,finishReason:providerResponse?.finishReason});
