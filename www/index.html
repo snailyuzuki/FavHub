@@ -2137,7 +2137,7 @@ const ProviderService = {
           if(result)addSupplementalSource(url,title||url);
         }else if(b.type==='bash_code_execution_tool_result'||b.type==='code_execution_tool_result'){
           const result=c&&typeof c==='object'?c:{};
-          lines.push(`コマンド: ${String(input.command||'(取得できません)').slice(0,400)}`,`stdout: ${result.stdout||'(空)'}`,`stderr: ${result.stderr||'(空)'}`,`return_code: ${result.return_code??'(なし)'}`);
+          lines.push(`コマンド: ${String(input.command||input.code||'(取得できません)').slice(0,400)}`,`stdout: ${result.stdout||'(空)'}`,`stderr: ${result.stderr||'(空)'}`,`return_code: ${result.return_code??'(なし)'}`);
           const outputs=Array.isArray(result.content)?result.content.filter(x=>x&&x.file_id):[];
           if(outputs.length)lines.push('生成ファイル:',...outputs.map(x=>{generatedFileIds.add(x.file_id);return `file_id: ${x.file_id} / ファイル名: メタデータ取得待ち`;}));
         }else if(b.type==='text_editor_code_execution_tool_result'){
@@ -2199,35 +2199,66 @@ const ProviderService = {
       messages.push({role:'assistant',content:sanitizeBlocks(blocks)});
     }
     if(!terminal)throw Object.assign(new Error('Claudeの応答が完了しませんでした。'),{status:502,provider:'Claude',streamError:true});
-    // 生成ファイルは公式 Files API から取得する（メタデータ→本体の順。両方とも独立して試す）。
-    // 失敗しても本回答は失敗扱いにせず、理由を fileFetch（診断ログ）とツール詳細へ残す。
+    // 生成ファイルは公式 Files API から取得する（メタデータ→本体の順）。
+    // /v1/files は WebView の CORS 制約を受けるため、Capacitor ネイティブ環境では CapacitorHttp を利用する。
     const FILES_API_BASE='https://api.anthropic.com/v1/files';
     const CLAUDE_FILE_MAX_BYTES=20*1024*1024;
     const filesApiHeaders=accept=>({'x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-beta':'files-api-2025-04-14','anthropic-dangerous-direct-browser-access':'true','Accept':accept});
+    const throwIfAborted=signal=>{if(signal?.aborted)throw new DOMException('The operation was aborted.','AbortError');};
     const failText=e=>{
       const name=e?.name||'Error',msg=maskSecretsInText(e?.message||e||'').slice(0,160);
       const hint=name==='TypeError'?'（通信失敗：CORS・オフライン等の可能性）':name==='TimeoutError'?'（タイムアウト）':name==='AbortError'?'（中断）':'';
       return `${name}: ${msg}${hint}`;
     };
+    const safeErrorBody=value=>{
+      let body='';
+      try{body=typeof value==='string'?value:JSON.stringify(value??'');}catch{body=String(value??'');}
+      return maskSecretsInText(body).slice(0,200);
+    };
     const httpFailText=async r=>{let body='';try{body=maskSecretsInText(await r.text()).slice(0,200);}catch{}return `HTTP ${r.status}${body?` ${body}`:''}`;};
+    // 戻り値はHTTPステータスエラーと通信例外を分離する。CapacitorHttp自体はAbortSignal非対応。
+    const filesApiGet=async(url,{accept='application/json',binary=false,signal,timeoutMs=REQUEST_TIMEOUT_MS,mime='application/octet-stream'}={})=>{
+      throwIfAborted(signal);
+      const native=globalThis.Capacitor?.isNativePlatform?.()===true&&typeof globalThis.Capacitor?.Plugins?.CapacitorHttp?.get==='function';
+      if(!native){
+        const r=await fetchWithTimeout(url,{method:'GET',signal,headers:filesApiHeaders(accept)},timeoutMs);
+        if(!r.ok)return {status:r.status,ok:false,errorBody:await httpFailText(r),via:'fetch'};
+        if(binary){const blob=await r.blob();return {status:r.status,ok:true,blob,via:'fetch'};}
+        return {status:r.status,ok:true,json:await r.json(),via:'fetch'};
+      }
+      const response=await globalThis.Capacitor.Plugins.CapacitorHttp.get({url,headers:filesApiHeaders(accept),responseType:binary?'blob':'json',connectTimeout:timeoutMs,readTimeout:timeoutMs});
+      throwIfAborted(signal);
+      const status=Number(response?.status)||0,ok=status>=200&&status<300;
+      if(!ok)return {status,ok:false,errorBody:safeErrorBody(response?.data),via:'native'};
+      if(!binary)return {status,ok:true,json:response?.data,via:'native'};
+      const encoded=typeof response?.data==='string'?response.data:'';
+      const padding=encoded.endsWith('==')?2:encoded.endsWith('=')?1:0;
+      const estimatedBytes=Math.max(0,Math.floor(encoded.length*3/4)-padding);
+      if(estimatedBytes>CLAUDE_FILE_MAX_BYTES)return {status,ok:false,errorBody:`サイズ超過（上限 ${CLAUDE_FILE_MAX_BYTES} bytes）`,bytes:estimatedBytes,via:'native'};
+      let binaryString;
+      try{binaryString=atob(encoded);}catch(e){throw new Error(`Files API の base64 応答を復号できません: ${maskSecretsInText(e?.message||e)}`);}
+      const bytes=new Uint8Array(binaryString.length);
+      for(let i=0;i<binaryString.length;i++)bytes[i]=binaryString.charCodeAt(i);
+      throwIfAborted(signal);
+      const blob=new Blob([bytes],{type:mime||'application/octet-stream'});
+      return {status,ok:true,blob,bytes:blob.size,via:'native'};
+    };
     const fetched=await Promise.all(Array.from(generatedFileIds).map(async fileId=>{
-      const rec={fileId,metaStatus:null,contentStatus:null,fileName:null,mimeType:null,bytes:null,metaError:null,contentError:null};
+      const rec={fileId,metaStatus:null,contentStatus:null,fileName:null,mimeType:null,bytes:null,metaError:null,contentError:null,via:globalThis.Capacitor?.isNativePlatform?.()===true&&typeof globalThis.Capacitor?.Plugins?.CapacitorHttp?.get==='function'?'native':'fetch'};
       let meta=null,blob=null;
       try{
-        const r=await fetchWithTimeout(`${FILES_API_BASE}/${encodeURIComponent(fileId)}`,{method:'GET',signal,headers:filesApiHeaders('application/json')},resolveRequestTimeout({}));
-        rec.metaStatus=r.status;
-        if(r.ok)meta=await r.json();else rec.metaError=await httpFailText(r);
+        const r=await filesApiGet(`${FILES_API_BASE}/${encodeURIComponent(fileId)}`,{accept:'application/json',signal,timeoutMs:resolveRequestTimeout({})});
+        rec.metaStatus=r.status;rec.via=r.via;
+        if(r.ok)meta=r.json;else rec.metaError=`HTTP ${r.status}${r.errorBody?` ${r.errorBody}`:''}`;
       }catch(e){rec.metaStatus='network_error';rec.metaError=failText(e);}
       if(meta?.downloadable===false){rec.contentStatus='not_downloadable';rec.contentError='このファイルはダウンロード不可（downloadable=false）';}
       else{
+        const provisionalMime=(typeof meta?.mime_type==='string'&&meta.mime_type&&meta.mime_type!=='application/octet-stream')?meta.mime_type:mimeFromFileName(typeof meta?.filename==='string'?meta.filename:'')||'application/octet-stream';
         try{
-          const r=await fetchWithTimeout(`${FILES_API_BASE}/${encodeURIComponent(fileId)}/content`,{method:'GET',signal,headers:filesApiHeaders('*/*')},resolveRequestTimeout({tools:true}));
-          rec.contentStatus=r.status;
-          if(r.ok){
-            const b=await r.blob();rec.bytes=b.size;
-            if(b.size>CLAUDE_FILE_MAX_BYTES){rec.contentError=`サイズ超過（上限 ${CLAUDE_FILE_MAX_BYTES} bytes）`;}
-            else blob=b;
-          }else rec.contentError=await httpFailText(r);
+          const r=await filesApiGet(`${FILES_API_BASE}/${encodeURIComponent(fileId)}/content`,{accept:'*/*',binary:true,signal,timeoutMs:resolveRequestTimeout({tools:true}),mime:provisionalMime});
+          rec.contentStatus=r.status;rec.via=r.via;
+          if(r.ok){blob=r.blob;rec.bytes=r.bytes??blob?.size??null;}
+          else{rec.contentError=`HTTP ${r.status}${r.errorBody?` ${r.errorBody}`:''}`;if(r.bytes!=null)rec.bytes=r.bytes;}
         }catch(e){rec.contentStatus='network_error';rec.contentError=failText(e);}
       }
       rec.fileName=(typeof meta?.filename==='string'&&meta.filename)?meta.filename:null;
@@ -2245,6 +2276,12 @@ const ProviderService = {
     }));
     const fileFetch=fetched.map(x=>x.rec);
     for(const x of fetched)if(x.item)media.push(x.item);
+    const failedFiles=fileFetch.filter(r=>!fetched.find(x=>x.rec.fileId===r.fileId)?.item);
+    if(failedFiles.length){
+      const reason=failedFiles.map(r=>{const details=[r.metaError&&`メタデータ: ${r.metaError}`,r.contentError&&`本体: ${r.contentError}`].filter(Boolean);return `${r.fileName||r.fileId}: ${details.join(' / ')||'取得に失敗しました'}`;}).join('； ');
+      const warning=`\n\n⚠ 生成ファイルを取得できませんでした（${maskSecretsInText(reason).slice(0,800)}）`;
+      allText+=warning;onDelta(warning);
+    }
     const fetchSummary=id=>{
       const r=fileFetch.find(x=>x.fileId===id);if(!r)return '';
       const st=v=>typeof v==='number'?`HTTP ${v}`:(v||'未実施');
