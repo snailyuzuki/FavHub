@@ -2153,9 +2153,16 @@ const ProviderService = {
       return Array.from(toolDetailsById.values());
     };
     const maxContinuations=5;
+    const dateTimezone=opts.userTimezone||'Asia/Tokyo';
+    let currentDate='';
+    try{currentDate=new Intl.DateTimeFormat('ja-JP',{timeZone:dateTimezone,dateStyle:'full'}).format(new Date());}
+    catch{currentDate=new Intl.DateTimeFormat('ja-JP',{timeZone:'Asia/Tokyo',dateStyle:'full'}).format(new Date());}
+    const searchPolicy='最新ニュースなどを求められたら、日付を含めて検索し、検索結果のニュース一覧ページ（例: Yahoo!ニュース速報、NHKニュース）を web_fetch で開いて見出しを取得すること。ツールの利用可否は毎回変わるため、過去の発言に関係なく必要なら再度ツールを試すこと。ツールが失敗した場合は、ログの内容を根拠にし、「利用上限」などと推測で断定しないこと。';
+    const systemSuffix=`現在の日付: ${currentDate}\n${searchPolicy}`;
+    const effectiveSystemPrompt=systemPrompt?`${systemPrompt}\n\n${systemSuffix}`:systemSuffix;
     for(let turn=0;turn<=maxContinuations;turn++){
       const payload={model,max_tokens:Number.isFinite(maxOutputTokens)&&maxOutputTokens>0?maxOutputTokens:4096,stream:true,messages};
-      if(systemPrompt)payload.system=systemPrompt;
+      payload.system=effectiveSystemPrompt;
       if(tools.length)payload.tools=tools;
       if(useThinking){payload.thinking={type:'adaptive'};payload.output_config={effort:CLAUDE_ADAPTIVE_EFFORT};}
       const res=await fetchWithTimeout(endpoint,{method:'POST',signal,keepAbortAfterResponse:true,headers:{'x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true','Content-Type':'application/json','Accept':'text/event-stream'},body:JSON.stringify(payload)},resolveRequestTimeout({thinking:!!useThinking,tools:tools.length>0}));
@@ -2205,6 +2212,7 @@ const ProviderService = {
     const CLAUDE_FILE_MAX_BYTES=20*1024*1024;
     const filesApiHeaders=accept=>({'x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-beta':'files-api-2025-04-14','anthropic-dangerous-direct-browser-access':'true','Accept':accept});
     const throwIfAborted=signal=>{if(signal?.aborted)throw new DOMException('The operation was aborted.','AbortError');};
+    const isNativeHttp=()=>globalThis.Capacitor?.isNativePlatform?.()===true&&typeof globalThis.Capacitor?.Plugins?.CapacitorHttp?.get==='function';
     const failText=e=>{
       const name=e?.name||'Error',msg=maskSecretsInText(e?.message||e||'').slice(0,160);
       const hint=name==='TypeError'?'（通信失敗：CORS・オフライン等の可能性）':name==='TimeoutError'?'（タイムアウト）':name==='AbortError'?'（中断）':'';
@@ -2219,17 +2227,26 @@ const ProviderService = {
     // 戻り値はHTTPステータスエラーと通信例外を分離する。CapacitorHttp自体はAbortSignal非対応。
     const filesApiGet=async(url,{accept='application/json',binary=false,signal,timeoutMs=REQUEST_TIMEOUT_MS,mime='application/octet-stream'}={})=>{
       throwIfAborted(signal);
-      const native=globalThis.Capacitor?.isNativePlatform?.()===true&&typeof globalThis.Capacitor?.Plugins?.CapacitorHttp?.get==='function';
-      if(!native){
+      if(!isNativeHttp()){
         const r=await fetchWithTimeout(url,{method:'GET',signal,headers:filesApiHeaders(accept)},timeoutMs);
         if(!r.ok)return {status:r.status,ok:false,errorBody:await httpFailText(r),via:'fetch'};
-        if(binary){const blob=await r.blob();return {status:r.status,ok:true,blob,via:'fetch'};}
+        if(binary){
+          const blob=await r.blob();
+          if(blob.size>CLAUDE_FILE_MAX_BYTES)return {status:r.status,ok:false,errorBody:`サイズ超過（上限 ${CLAUDE_FILE_MAX_BYTES} bytes）`,bytes:blob.size,via:'fetch'};
+          return {status:r.status,ok:true,blob,bytes:blob.size,via:'fetch'};
+        }
         return {status:r.status,ok:true,json:await r.json(),via:'fetch'};
       }
-      const response=await globalThis.Capacitor.Plugins.CapacitorHttp.get({url,headers:filesApiHeaders(accept),responseType:binary?'blob':'json',connectTimeout:timeoutMs,readTimeout:timeoutMs});
+      const response=await globalThis.Capacitor.Plugins.CapacitorHttp.get({url,headers:filesApiHeaders(accept),responseType:binary?'blob':'json',connectTimeout:Math.min(timeoutMs,30000),readTimeout:timeoutMs});
       throwIfAborted(signal);
       const status=Number(response?.status)||0,ok=status>=200&&status<300;
-      if(!ok)return {status,ok:false,errorBody:safeErrorBody(response?.data),via:'native'};
+      if(!ok){
+        let errorData=response?.data;
+        if(binary&&typeof errorData==='string'){
+          try{const decoded=atob(errorData);const bytes=Uint8Array.from(decoded,ch=>ch.charCodeAt(0));errorData=new TextDecoder('utf-8').decode(bytes);}catch{}
+        }
+        return {status,ok:false,errorBody:safeErrorBody(errorData),via:'native'};
+      }
       if(!binary)return {status,ok:true,json:response?.data,via:'native'};
       const encoded=typeof response?.data==='string'?response.data:'';
       const padding=encoded.endsWith('==')?2:encoded.endsWith('=')?1:0;
@@ -2244,7 +2261,7 @@ const ProviderService = {
       return {status,ok:true,blob,bytes:blob.size,via:'native'};
     };
     const fetched=await Promise.all(Array.from(generatedFileIds).map(async fileId=>{
-      const rec={fileId,metaStatus:null,contentStatus:null,fileName:null,mimeType:null,bytes:null,metaError:null,contentError:null,via:globalThis.Capacitor?.isNativePlatform?.()===true&&typeof globalThis.Capacitor?.Plugins?.CapacitorHttp?.get==='function'?'native':'fetch'};
+      const rec={fileId,metaStatus:null,contentStatus:null,fileName:null,mimeType:null,bytes:null,metaError:null,contentError:null,via:isNativeHttp()?'native':'fetch'};
       let meta=null,blob=null;
       try{
         const r=await filesApiGet(`${FILES_API_BASE}/${encodeURIComponent(fileId)}`,{accept:'application/json',signal,timeoutMs:resolveRequestTimeout({})});
@@ -2276,7 +2293,7 @@ const ProviderService = {
     }));
     const fileFetch=fetched.map(x=>x.rec);
     for(const x of fetched)if(x.item)media.push(x.item);
-    const failedFiles=fileFetch.filter(r=>!fetched.find(x=>x.rec.fileId===r.fileId)?.item);
+    const failedFiles=fetched.filter(x=>!x.item).map(x=>x.rec);
     if(failedFiles.length){
       const reason=failedFiles.map(r=>{const details=[r.metaError&&`メタデータ: ${r.metaError}`,r.contentError&&`本体: ${r.contentError}`].filter(Boolean);return `${r.fileName||r.fileId}: ${details.join(' / ')||'取得に失敗しました'}`;}).join('； ');
       const warning=`\n\n⚠ 生成ファイルを取得できませんでした（${maskSecretsInText(reason).slice(0,800)}）`;
@@ -2289,8 +2306,8 @@ const ProviderService = {
       return `\n取得結果: メタデータ=${st(r.metaStatus)} / 本体=${st(r.contentStatus)}${r.bytes!=null?` (${r.bytes} bytes)`:''}${errs.length?`\n${errs.join('\n')}`:''}`;
     };
     for(const detail of toolDetailsById.values())detail.text=detail.text.replace(/file_id: ([^\s]+) \/ ファイル名: メタデータ取得待ち/g,(whole,id)=>`file_id: ${id} / ファイル名: ${fileNames.get(id)||'取得できませんでした'}${fetchSummary(id)}`);
-    // 引用が1件でもある場合は引用のみ。引用がない場合だけ検索結果とfetch結果を補助出典にする。
-    sources=citationSources.length?citationSources:supplementalSources;
+    // 引用が1件でもある場合は引用のみ。引用がない場合は本文にURLが含まれる補助出典だけを表示する。
+    sources=citationSources.length?citationSources:supplementalSources.filter(src=>typeof src.url==='string'&&src.url&&allText.includes(src.url));
     if(onSources)onSources(sources);const toolDetails=Array.from(toolDetailsById.values());if(onToolDetails)onToolDetails(toolDetails);if(media.length&&onMedia)onMedia(media);
     return {text:allText,media,sources,toolDetails,finishReason:finishReason||'end_turn',usage,...(fileFetch.length?{fileFetch}:{})};
   },
@@ -2800,8 +2817,10 @@ const UI = {
       if(!/^https?:\/\//i.test(rawUrl)) continue;
       let u; try { u=new URL(rawUrl); } catch { continue; }
       if(!['http:','https:'].includes(u.protocol)) continue;
-      const a=document.createElement('a'); a.href=u.href; a.textContent=src.title||src.url; a.target='_blank'; a.rel='noopener noreferrer';
-      box.appendChild(a); validCount++;
+      const row=document.createElement('div');row.className='response-source-item';
+      const a=document.createElement('a'); a.href=u.href; a.textContent=src.title||src.url; a.target='_blank'; a.rel='noopener noreferrer';row.appendChild(a);
+      const host=document.createElement('small');host.className='response-source-host';host.textContent=u.hostname;host.style.marginLeft='0.45em';host.style.opacity='0.7';row.appendChild(host);
+      box.appendChild(row); validCount++;
     }
     box.hidden=validCount===0;
   },
